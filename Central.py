@@ -5,9 +5,9 @@ import time
 HOST = '127.0.0.1'
 PORT = 65432
 
-class Central:
+class TaxiCentral:
     def __init__(self):
-        self.taxis = self.cargar_data_taxi('taxi_db.json')
+        self.taxis = self.cargar_data_taxi('taxis_db.json')
         self.locations = self.load_map('mapa.txt')
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.bind((HOST, PORT))
@@ -63,5 +63,5 @@ class Central:
             threading.Thread(target=self.handle_client, args=(client_socket,)).start()
 
 if __name__ == "__main__":
-    central = Central()
+    central = TaxiCentral()
     central.run()
