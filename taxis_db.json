@@ -1,5 +1,5 @@
 [
-    {"id": "taxi1", "estado": "disponible"},
-    {"id": "taxi2", "estado": "disponible"},
-    {"id": "taxi3", "estado": "disponible"}
+    {"id": "taxi1", "status": "avaliable"},
+    {"id": "taxi2", "status": "davaliable"},
+    {"id": "taxi3", "status": "avaliable"}
 ]
