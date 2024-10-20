@@ -23,7 +23,7 @@ class ECCentral:
     def cargar_localizaciones(self):
         # Lee el archivo EC_locations.json y carga las localizaciones en el mapa
         try:
-            with open('EC_locations.json', 'r') as archivo_localizaciones:
+            with open(self.map_path, 'r') as archivo_localizaciones:
                 configuracion_localizaciones = json.load(archivo_localizaciones)
                 for localizacion in configuracion_localizaciones['locations']:
                     id_localizacion = localizacion['Id']
@@ -32,6 +32,22 @@ class ECCentral:
                 print("Localizaciones cargadas correctamente.")
         except Exception as e:
             print(f"Error cargando las localizaciones: {e}")
+                
+    def cargar_taxis_desde_bd(self):
+        # Lee el archivo taxis_db.json y carga los taxis en el mapa y en la lista de taxis disponibles
+        try:
+            with open('taxis_db.json', 'r') as archivo_taxis:
+                taxis_data = json.load(archivo_taxis)
+                for taxi in taxis_data:
+                    taxi_id = taxi['id']
+                    self.taxis_disponibles[taxi_id] = {
+                        'status': taxi['status'],
+                        'posicion': [1, 1]  # Todos los taxis comienzan en la posición [1, 1]
+                    }
+                print("Taxis cargados correctamente.")
+        except Exception as e:
+            print(f"Error cargando los taxis: {e}")
+        
 
     def inicializar_kafka(self):
         # Inicializa los productores y consumidores de Kafka para la comunicación con los taxis y clientes
@@ -276,10 +292,19 @@ class ECCentral:
             return False
 
 
+    def imprimir_taxis(self):
+        if not self.taxis_disponibles:
+            print("No hay taxis disponibles.")
+        else:
+            for taxi_id, taxi_info in self.taxis_disponibles.items():
+                print(f"Soy el taxi {taxi_id}, estoy disponible en la posición {taxi_info['posicion']}.")
+
+
+
 if __name__ == "__main__":
-    puerto_escucha = 5000  # EJEMPLO
+    puerto_escucha = 2181  # EJEMPLO
     broker_ip = "localhost:9092"  # HABRA QUE CAMBIARLO
-    db_path = "taxis.db"  # Ruta a la base de datos SQLite
+    db_path = "taxis_db.json"  # Ruta a la base de datos SQLite
     map_path = "EC_locations.json"  # Aquí habria que leerlo para evitarp roblemas
 
     # Instanciar la central
@@ -293,6 +318,7 @@ if __name__ == "__main__":
     # Cargar taxis y localizaciones desde archivos y base de datos
     ec_central.cargar_localizaciones()
     ec_central.cargar_taxis_desde_bd()
+    ec_central.imprimir_taxis()
 
     # Comenzar a escuchar peticiones de Kafka
     try:
