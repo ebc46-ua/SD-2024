@@ -4,8 +4,11 @@ import socket
 import time
 import kafka
 import sqlite3
-from kafka import KafkaProducer, KafkaConsumer
-
+from pygame import *
+import pygame
+import threading
+from kafka import KafkaProducer, KafkaConsumer 
+ 
 class ECCentral:
     def __init__(self, puerto_escucha, broker_ip, db_path, map_path):
         self.puerto_escucha = puerto_escucha
@@ -15,23 +18,253 @@ class ECCentral:
         self.mapa = [[' ' for _ in range(20)] for _ in range(20)]  # Mapa 20x20 vacío
         self.taxis_disponibles = {}
         self.clientes_activos = []
+        self.taxi_cliente = {}  # Diccionario para asociar taxi_id con cliente_id
         self.taxis_autenticados = {}
+        self.sockets_taxis = {}  # Almacenar los sockets de los taxis
+        self.iniciar_servidor_sockets()
         self.cargar_localizaciones()  # Carga las localizaciones desde el archivo JSON
         self.inicializar_kafka()
+        
+        pygame.init()
+        self.ancho_ventana = 400  # Ancho de la ventana
+        self.alto_ventana = 400   # Alto de la ventana
+        self.tamaño_celda = 20    # Tamaño de cada celda en píxeles
+        self.ventana = pygame.display.set_mode((self.ancho_ventana, self.alto_ventana))
+        pygame.display.set_caption("Mapa de Taxis")
+        self.font = pygame.font.SysFont(None, 14)
  
+    def iniciar_servidor_sockets(self):
+        self.servidor_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.servidor_socket.bind(('localhost', self.puerto_escucha))
+        self.servidor_socket.listen(5)
+        threading.Thread(target=self.aceptar_conexiones_taxis, daemon=True).start()
+        print(f"[CENTRAL] Servidor de sockets iniciado en el puerto {self.puerto_escucha}")
 
+    def aceptar_conexiones_taxis(self):
+        while True:
+            cliente_socket, direccion = self.servidor_socket.accept()
+            threading.Thread(target=self.procesar_conexion_taxi, args=(cliente_socket,), daemon=True).start()
+            print(f"[CENTRAL] Conexión entrante de {direccion}")
+
+    def procesar_conexion_taxi(self, cliente_socket):
+        try:
+            # Paso 1: Recibir ENQ
+            mensaje = cliente_socket.recv(1024).decode()
+            if mensaje == 'ENQ':
+                # Enviar ACK
+                cliente_socket.send('ACK'.encode())
+            else:
+                cliente_socket.send('NACK'.encode())
+                cliente_socket.close()
+                return
+
+            # Paso 2: Recibir solicitud de autenticación
+            mensaje = cliente_socket.recv(1024).decode()
+            # Extraer <STX>, <DATA>, <ETX>, <LRC>
+            stx_index = mensaje.find('<STX>')
+            etx_index = mensaje.find('<ETX>')
+            lrc_index = mensaje.find('<LRC>')
+
+            if stx_index != -1 and etx_index != -1 and lrc_index != -1:
+                data = mensaje[stx_index+5:etx_index]
+                lrc = mensaje[lrc_index+5:]
+                # Verificar LRC
+                if self.verificar_lrc(data, lrc):
+                    # Procesar datos de autenticación
+                    campos = data.split('#')
+                    if campos[0] == 'AUTH':
+                        taxi_id = campos[1]
+                        token = campos[2]
+                        datos_taxi = {'id': taxi_id, 'token': token}
+                        if self.autentifica(datos_taxi):
+                            cliente_socket.send('ACK'.encode())
+                             # Almacenar el socket del taxi
+                            self.sockets_taxis[taxi_id] = cliente_socket
+                            # Mantener comunicación con el taxi
+                            threading.Thread(target=self.gestionar_taxi, args=(cliente_socket, taxi_id), daemon=True).start()
+                        else:
+                            cliente_socket.send('NACK'.encode())
+                    else:
+                        cliente_socket.send('NACK'.encode())
+                else:
+                    cliente_socket.send('NACK'.encode())
+            else:
+                cliente_socket.send('NACK'.encode())
+                cliente_socket.close()
+        except Exception as e:
+            print(f"[CENTRAL] Error al procesar conexión de taxi: {e}")
+            cliente_socket.close()
+
+    def verificar_lrc(self, data, lrc):
+        # Implementar la verificación del LRC
+        calculated_lrc = self.calcular_lrc(data)
+        return calculated_lrc == lrc
+
+    def calcular_lrc(self, data):
+        # Calcular LRC como XOR de los bytes
+        lrc = 0
+        for byte in data.encode():
+            lrc ^= byte
+        return str(lrc)
+
+    def enviar_mapa_actualizado(self):
+        # Preparar los datos a enviar: posiciones y estados de todos los taxis
+        taxis_estado = {}
+        for taxi_id, taxi_info in self.taxis_autenticados.items():
+            taxis_estado[taxi_id] = {
+                'posicion': taxi_info['posicion'],
+                'estado': taxi_info['estado']
+            }
+        data = 'MAP#' + json.dumps(taxis_estado)
+        lrc = self.calcular_lrc(data)
+        mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
+        # Enviar a todos los taxis
+        for taxi_socket in self.sockets_taxis.values():
+            try:
+                taxi_socket.send(mensaje.encode())
+            except Exception as e:
+                print(f"[CENTRAL] Error al enviar mapa actualizado: {e}")
+
+    
+    def gestionar_taxi(self, cliente_socket, taxi_id):
+        # Mantener comunicación con el taxi
+        try:
+            while True:
+                mensaje = cliente_socket.recv(1024).decode()
+                if mensaje:
+                    # Procesar mensajes del taxi
+                    # Por ejemplo, actualizaciones de posición
+                    print(f"[CENTRAL] Mensaje recibido de taxi {taxi_id}: {mensaje}")
+                    # Extraer <STX>, <DATA>, <ETX>, <LRC>
+                    stx_index = mensaje.find('<STX>')
+                    etx_index = mensaje.find('<ETX>')
+                    lrc_index = mensaje.find('<LRC>')
+
+                    if stx_index != -1 and etx_index != -1 and lrc_index != -1:
+                        data = mensaje[stx_index+5:etx_index]
+                        lrc = mensaje[lrc_index+5:]
+                        # Verificar LRC
+                        if self.verificar_lrc(data, lrc):
+                            campos = data.split('#')
+                            if campos[0] == 'POS':
+                                # Actualizar posición del taxi
+                                x, y = int(campos[1]), int(campos[2])
+                                self.taxis_autenticados[taxi_id]['posicion'] = (x, y)
+                                self.dibujar_mapa()
+                                # Enviar ACK
+                                cliente_socket.send('ACK'.encode())
+                                # Enviar mapa actualizado a todos los taxis
+                                self.enviar_mapa_actualizado()
+                            elif campos[0] == 'STATUS':
+                                estado = campos[1]
+                                print(f"[CENTRAL] Taxi {taxi_id} está en estado '{estado}'")
+                                self.taxis_autenticados[taxi_id]['estado'] = estado
+                                self.dibujar_mapa()
+                                # Enviar ACK
+                                cliente_socket.send('ACK'.encode())
+                                # Enviar mapa actualizado a todos los taxis
+                                self.enviar_mapa_actualizado()
+                                # Si el estado es 'END', notificar al cliente
+                                if estado == 'END':
+                                    cliente_id = self.taxi_cliente.get(taxi_id)
+                                    if cliente_id:
+                                        self.enviar_mensaje_cliente(cliente_id, 'COMPLETED')
+                                        del self.taxi_cliente[taxi_id]
+                            else:
+                                cliente_socket.send('NACK'.encode())
+                        else:
+                            cliente_socket.send('NACK'.encode())
+                    else:
+                        cliente_socket.send('NACK'.encode())
+                else:
+                    break
+        except Exception as e:
+            print(f"[CENTRAL] Conexión con taxi {taxi_id} cerrada: {e}")
+            cliente_socket.close()
+            del self.sockets_taxis[taxi_id]
+            del self.taxis_autenticados[taxi_id]
+            self.dibujar_mapa()
+            self.enviar_mapa_actualizado()
+            
+    def dibujar_mapa(self):
+        for evento in pygame.event.get():
+            if evento.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+
+        self.ventana.fill((255, 255, 255))  # Limpiar la pantalla con color blanco
+
+        # Dibujar la cuadrícula
+        for x in range(0, self.ancho_ventana, self.tamaño_celda):
+            for y in range(0, self.alto_ventana, self.tamaño_celda):
+                rect = pygame.Rect(x, y, self.tamaño_celda, self.tamaño_celda)
+                pygame.draw.rect(self.ventana, (200, 200, 200), rect, 1)
+
+        # Dibujar las localizaciones
+        for id_localizacion, coord in self.localizaciones.items():
+            x, y = coord
+            rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
+            pygame.draw.rect(self.ventana, (0, 0, 255), rect)  # Color azul para las localizaciones
+            # Opcional: dibujar el ID de la localización
+            font = pygame.font.SysFont(None, 14)
+            img = font.render(id_localizacion, True, (255, 255, 255))
+            self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+
+        # Dibujar los taxis
+        for taxi_id, taxi_info in self.taxis_autenticados.items():
+            x, y = taxi_info['posicion']
+            rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
+            if taxi_info['estado'] == 'RUN':
+                color_taxi = (0, 255, 0)  # Verde para estado RUN
+            elif taxi_info['estado'] == 'STOPPED':
+                color_taxi = (255, 255, 0)  # Amarillo para estado STOPPED
+            elif taxi_info['estado'] == 'END':
+                color_taxi = (255, 0, 0)  # Magenta para estado BUSY
+            else:
+                color_taxi = (255, 0, 255)  # Morado para estado desconocido
+            pygame.draw.rect(self.ventana, color_taxi, rect)
+            
+            img = font.render(str(taxi_id), True, (255, 255, 255))
+            self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+
+        pygame.display.flip()  # Actualizar la pantalla
+
+    def actualizar_pygame(self):
+        while True:
+            self.dibujar_mapa()
+            time.sleep(0.1)  # Pequeña pausa para no saturar la CPU
+            
+            
     def cargar_localizaciones(self):
         # Lee el archivo EC_locations.json y carga las localizaciones en el mapa
         try:
-            with open('EC_locations.json', 'r') as archivo_localizaciones:
+            with open(self.map_path, 'r') as archivo_localizaciones:
                 configuracion_localizaciones = json.load(archivo_localizaciones)
+                self.localizaciones = {}
                 for localizacion in configuracion_localizaciones['locations']:
                     id_localizacion = localizacion['Id']
                     x, y = map(int, localizacion['POS'].split(','))
                     self.mapa[x][y] = id_localizacion
+                    self.localizaciones[id_localizacion] = (x, y)
                 print("Localizaciones cargadas correctamente.")
         except Exception as e:
             print(f"Error cargando las localizaciones: {e}")
+                
+    def cargar_taxis_desde_bd(self):
+        # Lee el archivo taxis_db.json y carga los taxis en el mapa y en la lista de taxis disponibles
+        try:
+            with open('taxis_db.json', 'r') as archivo_taxis:
+                taxis_data = json.load(archivo_taxis)
+                for taxi in taxis_data:
+                    taxi_id = taxi['id']
+                    self.taxis_disponibles[taxi_id] = {
+                        'estado': taxi['estado'],
+                        'posicion': [1, 1]  # Todos los taxis comienzan en la posición [1, 1]
+                    }
+                print("Taxis cargados correctamente.")
+        except Exception as e:
+            print(f"Error cargando los taxis: {e}")
+        
 
     def inicializar_kafka(self):
         # Inicializa los productores y consumidores de Kafka para la comunicación con los taxis y clientes
@@ -39,7 +272,25 @@ class ECCentral:
         self.consumer = KafkaConsumer('solicitudes', bootstrap_servers=[self.broker_ip], group_id='central')
         self.consumer_taxi = KafkaConsumer('auth_taxi', bootstrap_servers=[self.broker_ip], group_id='central')
         self.consumer_comando = KafkaConsumer('comando_taxi', bootstrap_servers=[self.broker_ip], group_id='central')
-        
+        self.producer_respuestas = KafkaProducer(bootstrap_servers=[self.broker_ip])
+
+            
+    
+    def cargar_solicitudes(self):
+        # Lee el archivo EC_Requests.json y carga las solicitudes
+        try:
+            with open('EC_Requests.json', 'r') as archivo_requests:
+                requests_data = json.load(archivo_requests)
+                self.solicitudes = []
+                for request in requests_data['Requests']:
+                    destino_id = request['Id']
+                    self.solicitudes.append(destino_id)
+                print("Solicitudes de clientes cargadas correctamente.")
+        except Exception as e:
+            print(f"Error cargando las solicitudes de clientes: {e}")
+            self.solicitudes = []
+
+
     def cargar_mapa(self):
         # Lee el archivo JSON con la configuración del mapa y actualiza el mapa vacío
         try:
@@ -59,25 +310,61 @@ class ECCentral:
             print(f"Error cargando el mapa: {e}")
 
     def autentifica(self, datos_taxi):
-        # Autenticar taxi a través de la base de datos usando su ID y token
+        # Autenticar taxi usando su ID y token
         try:
-            conexion = sqlite3.connect(self.db_path)
-            cursor = conexion.cursor()
-            cursor.execute('SELECT alias FROM taxis WHERE id = ? AND token = ?', (datos_taxi['id'], datos_taxi['token']))
-            resultado = cursor.fetchone()
-            conexion.close()
+            # Cargar taxis existentes desde el archivo JSON
+            with open(self.db_path, 'r') as archivo_taxis:
+                taxis_data = json.load(archivo_taxis)
+        except Exception as e:
+            print(f"Error cargando los taxis: {e}")
+            taxis_data = []
 
-            if resultado is not None:
+        # Verificar si el taxi ya está registrado
+        taxi_encontrado = None
+        for taxi in taxis_data:
+            if taxi['id'] == datos_taxi['id']:
+                taxi_encontrado = taxi
+                break
+
+        if taxi_encontrado:
+            # Verificar si el token coincide
+            if taxi_encontrado['token'] == datos_taxi['token']:
                 print(f"El taxi con id {datos_taxi['id']} ha accedido al sistema.")
-                taxi_autenticado = {"id": datos_taxi['id'], "posicion": datos_taxi['posicion']}
-                self.taxis_autenticados[datos_taxi['id']] = taxi_autenticado
-                return True
             else:
-                print(f"Autenticación fallida para el taxi con id {datos_taxi['id']}.")
+                print(f"Autenticación fallida para el taxi con id {datos_taxi['id']}. Token incorrecto.")
                 return False
-        except sqlite3.Error as e:
-            print(f"Error en la autenticación: {e}")
-            return False
+        else:
+            # Si el taxi no está registrado, añadirlo al archivo JSON
+            nuevo_taxi = {
+                "id": datos_taxi['id'],
+                "token": datos_taxi['token'],
+                "estado": "FREE",
+                "alias": f"Taxi{datos_taxi['id']}",
+                "posicion": datos_taxi.get('posicion', [1, 1])
+            }
+            taxis_data.append(nuevo_taxi)
+            print(f"Nuevo taxi con id {datos_taxi['id']} registrado y autenticado.")
+
+            # Guardar el nuevo taxi en el archivo JSON
+            try:
+                with open(self.db_path, 'w') as archivo_taxis:
+                    json.dump(taxis_data, archivo_taxis, indent=4)
+                print(f"Base de datos '{self.db_path}' actualizada con el nuevo taxi.")
+            except Exception as e:
+                print(f"Error al guardar el nuevo taxi: {e}")
+                return False
+
+        # Añadir el taxi a taxis_autenticados y taxis_disponibles
+        taxi_autenticado = {
+            "id": datos_taxi['id'],
+            "posicion": datos_taxi.get('posicion', [1, 1]),
+            "estado": "FREE"
+        }
+        self.taxis_autenticados[datos_taxi['id']] = taxi_autenticado
+        self.taxis_disponibles[datos_taxi['id']] = taxi_autenticado
+        return True
+
+
 
     def procesar_autenticacion_taxi(self, autenticacion):
         # Procesa la autenticación de taxis
@@ -100,53 +387,117 @@ class ECCentral:
         # Procesa cada petición de servicio de taxi de los clientes
         cliente_id = peticion.get('cliente_id')
         destino = peticion.get('destino')
-        print(f"Recibida petición de cliente {cliente_id} para destino {destino}")
-        taxi_asignado = self.asignar_taxi(cliente_id, destino)
+        destino_coord = self.localizaciones.get(destino)
+        if not destino_coord:
+            print(f"[CENTRAL] Destino {destino} no encontrado.")
+            self.enviar_mensaje_cliente(cliente_id, 'KO')
+            return                                        
+        print(f"[CENTRAL] Recibida petición de cliente {cliente_id} para destino {destino_coord}")
+        taxi_asignado = self.asignar_taxi(cliente_id, destino_coord)
         if taxi_asignado:
-            self.enviar_taxi(taxi_asignado, cliente_id, destino)
+            print(f"[CENTRAL] Servicio aceptado para el cliente {cliente_id}. Enviando taxi {taxi_asignado}.")
+            self.taxi_cliente[taxi_asignado] = cliente_id
+            self.enviar_mensaje_cliente(cliente_id, 'OK')
+            self.enviar_taxi(taxi_asignado, cliente_id, destino_coord)
         else:
             print(f"No se ha podido asignar taxi a cliente {cliente_id}")
+            self.enviar_mensaje_cliente(cliente_id, 'KO')
 
-    def asignar_taxi(self, cliente_id, destino):
-        # Lógica para asignar un taxi disponible a una solicitud, solo taxis autenticados
-        for taxi in self.taxis_disponibles:
-            if self.taxis_autenticados.get(taxi, False):
-                self.taxis_disponibles.remove(taxi)
-                print(f"Taxi {taxi} asignado al cliente {cliente_id} para el destino {destino}")
-                return taxi
-        print("No hay taxis disponibles o no autenticados.")
+
+    def procesar_comandos_arbitrarios(self):
+        while True:
+            comando_input = input("Ingrese un comando (formato: TAXI_ID COMANDO [DESTINO]): ")
+            if comando_input:
+                partes = comando_input.strip().split()
+                if len(partes) >= 2:
+                    taxi_id = partes[0]
+                    comando = partes[1].upper()
+                    if taxi_id in self.taxis_autenticados:
+                        if comando == 'PARAR':
+                            self.enviar_comando_taxi(taxi_id, 'STOP')
+                        elif comando == 'REANUDAR':
+                            self.enviar_comando_taxi(taxi_id, 'RESUME')
+                        elif comando == 'IR_A_DESTINO' and len(partes) == 3:
+                            destino_id = partes[2]
+                            destino_coord = self.localizaciones.get(destino_id)
+                            if destino_coord:
+                                self.enviar_instrucciones_taxi(taxi_id, destino_coord)
+                            else:
+                                print(f"[CENTRAL] Destino {destino_id} no encontrado.")
+                        elif comando == 'VOLVER_BASE':
+                            self.enviar_instrucciones_taxi(taxi_id, (1, 1))
+                        else:
+                            print("[CENTRAL] Comando no reconocido o parámetros insuficientes.")
+                    else:
+                        print(f"[CENTRAL] Taxi {taxi_id} no está autenticado.")
+                else:
+                    print("[CENTRAL] Formato incorrecto. Use: TAXI_ID COMANDO [DESTINO]")
+    
+    def enviar_instrucciones_taxi(self, taxi_id, destino_coord):
+        # Enviar el destino al taxi a través del socket
+        cliente_socket = self.sockets_taxis.get(taxi_id)
+        if cliente_socket:
+            data = f'GO#{destino_coord[0]}#{destino_coord[1]}'
+            lrc = self.calcular_lrc(data)
+            mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
+            cliente_socket.send(mensaje.encode())
+            print(f"[CENTRAL] Instrucciones enviadas al taxi {taxi_id}")
+        else:
+            print(f"[CENTRAL] No se pudo enviar instrucciones al taxi {taxi_id}. Socket no encontrado.")
+
+
+    def enviar_mensaje_cliente(self, cliente_id, estado):
+        # Envía un mensaje al cliente a través de Kafka
+        mensaje = {
+            'cliente_id': cliente_id,
+            'estado': estado
+        }
+        self.producer_respuestas.send('respuestas_clientes', json.dumps(mensaje).encode())
+        print(f"[CENTRAL] Enviada respuesta al cliente {cliente_id}: {estado}")
+
+
+    def asignar_taxi(self, cliente_id, destino_coord):
+        # Lógica para asignar un taxi disponible a una solicitud
+        for taxi_id, taxi_info in self.taxis_autenticados.items():
+            if taxi_info.get('estado', 'FREE') == 'FREE':
+                taxi_info['estado'] = 'BUSY'
+                print(f"Taxi {taxi_id} asignado al cliente {cliente_id} para el destino {destino_coord}")
+                return taxi_id
+        print("No hay taxis disponibles.")
         return None
 
+    
     # def enviar_taxi(self, taxi_id, cliente_id, destino):
-    #     # Envía instrucciones al taxi a través de Kafka
-    #     mensaje = {
-    #         'taxi_id': taxi_id,
-    #         'cliente_id': cliente_id,
-    #         'destino': destino
-    #     }
-    #     self.producer.send('ordenes_taxi', json.dumps(mensaje).encode())
-    #     print(f"Enviado taxi {taxi_id} al cliente {cliente_id} para destino {destino}")
-    #     self.actualizar_mapa_taxi(taxi_id, destino)
+    #     # Simula el movimiento progresivo del taxi hasta el destino
+    #     taxi_info = self.taxis_autenticados.get(taxi_id)
+    #     if taxi_info:
+    #         pos_actual = taxi_info['posicion']
+    #         destino_coord = destino  # Ya es una tupla de coordenadas
+            
+    #         print(f"Taxi {taxi_id} comenzando movimiento hacia {destino_coord}.")
+    #         taxi_info['estado'] = 'RUN'
+             
+    #         # Movimiento paso a paso hacia el destino
+    #         while pos_actual != destino_coord:
+    #             pos_actual = self.calcular_siguiente_paso(pos_actual, destino_coord)
+    #             taxi_info['posicion'] = pos_actual
+    #             print(f"Taxi {taxi_id} moviéndose a {pos_actual}")
+    #             self.dibujar_mapa()
+    #             time.sleep(0.5)  # Simular movimiento en tiempo real
+                
+    #         print(f"Taxi {taxi_id} ha llegado a su destino.")
+    #         taxi_info['estado'] = 'FREE'  # Liberar el taxi para que pueda ser asignado a otro cliente
+    #         self.dibujar_mapa()
     
     def enviar_taxi(self, taxi_id, cliente_id, destino):
-        # Simula el movimiento progresivo del taxi hasta el destino
+        # Enviar instrucciones al taxi
         taxi_info = self.taxis_autenticados.get(taxi_id)
         if taxi_info:
-            pos_actual = taxi_info['posicion']
-            destino_coord = list(map(int, destino.split(',')))
-            
-            print(f"Taxi {taxi_id} comenzando movimiento hacia {destino_coord}.")
-
-            # Movimiento paso a paso hacia el destino
-            while pos_actual != destino_coord:
-                pos_actual = self.calcular_siguiente_paso(pos_actual, destino_coord)
-                taxi_info['posicion'] = pos_actual
-                print(f"Taxi {taxi_id} moviéndose a {pos_actual}")
-                self.actualizar_mapa_taxi(taxi_id, pos_actual)
-                time.sleep(1)  # Simular movimiento en tiempo real
-            print(f"Taxi {taxi_id} ha llegado a su destino.")
-            self.taxis_autenticados[taxi_id]['estado'] = 'free'
-            self.enviar_mapa_actualizado()
+            print(f"Taxi {taxi_id} comenzando movimiento hacia {destino}.")
+            taxi_info['estado'] = 'RUN'
+            self.enviar_instrucciones_taxi(taxi_id, destino)
+        else:
+            print(f"[CENTRAL] No se pudo enviar taxi {taxi_id} al cliente {cliente_id}.")
 
     def calcular_siguiente_paso(self, posicion_actual, destino):
         """Calcula el siguiente paso en el trayecto del taxi hacia su destino"""
@@ -180,7 +531,7 @@ class ECCentral:
                 elif estado == 'OK':
                     # Si el estado vuelve a OK, reanudar el servicio del taxi
                     print(f"Taxi {taxi_id} ha resuelto la incidencia y continúa su viaje.")
-                    self.taxis_autenticados[taxi_id]['estado'] = 'busy'
+                    self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
                     self.enviar_mensaje_taxi(taxi_id, 'RESUME')
     
     def procesar_comandos(self):
@@ -197,7 +548,7 @@ class ECCentral:
                 if comando == 'PARAR':
                     self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
                 elif comando == 'REANUDAR':
-                    self.taxis_autenticados[taxi_id]['estado'] = 'busy'
+                    self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
                 elif comando == 'VOLVER_BASE':
                     self.taxis_autenticados[taxi_id]['estado'] = 'returning'
                     self.enviar_taxi_a_base(taxi_id)
@@ -232,13 +583,16 @@ class ECCentral:
             self.enviar_mapa_actualizado()
             
     def enviar_comando_taxi(self, taxi_id, comando):
-        # Envía un comando arbitrario a un taxi
-        mensaje = {
-            'taxi_id': taxi_id,
-            'comando': comando
-        }
-        self.producer.send('comando_taxi', json.dumps(mensaje).encode())
-        print(f"Enviado comando '{comando}' al taxi {taxi_id}")
+        cliente_socket = self.sockets_taxis.get(taxi_id)
+        if cliente_socket:
+            data = f'CMD#{comando}'
+            lrc = self.calcular_lrc(data)
+            mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
+            cliente_socket.send(mensaje.encode())
+            print(f"[CENTRAL] Comando '{comando}' enviado al taxi {taxi_id}")
+        else:
+            print(f"[CENTRAL] No se pudo enviar comando al taxi {taxi_id}. Socket no encontrado.")
+
         
     def enviar_mapa_actualizado(self):
         # Envía el estado completo del mapa a todos los taxis y clientes conectados
@@ -250,7 +604,11 @@ class ECCentral:
         
     def escuchar_peticiones(self):
         # Escucha peticiones tanto de clientes como de taxis (autenticación)
+        print("[CENTRAL] Esperando solicitudes de clientes...")
+        
         while True:
+            self.dibujar_mapa()  # Actualizar la representación gráfica
+             
             for mensaje in self.consumer:
                 peticion = json.loads(mensaje.value.decode())
                 self.procesar_peticion_cliente(peticion)
@@ -258,28 +616,51 @@ class ECCentral:
             for mensaje in self.consumer_taxi:
                 autenticacion = json.loads(mensaje.value.decode())
                 self.procesar_autenticacion_taxi(autenticacion)
-    
+                
+
+
+    def procesar_solicitudes(self):
+        cliente_id = 1  # Podemos asignar IDs incrementales para los clientes
+        for destino_id in self.solicitudes:
+            # Convertir el ID del destino a coordenadas
+            destino_coord = self.localizaciones.get(destino_id)
+            if destino_coord:
+                print(f"Procesando solicitud del cliente {cliente_id} para destino {destino_id} en coordenadas {destino_coord}")
+                peticion = {
+                    'cliente_id': cliente_id,
+                    'destino': destino_coord
+                }
+                self.procesar_peticion_cliente(peticion)
+                cliente_id += 1
+                time.sleep(1)  # Simular tiempo entre solicitudes
+            else:
+                print(f"Destino {destino_id} no encontrado en las localizaciones.")
+
     
     def conectar_bd(self):
         if os.path.exists(self.db_path):
-            print(f"Base de datos '{self.db_path}' encontrada. Abriendo la base de datos.")
-            try:
-                conexion = sqlite3.connect(self.db_path)
-                conexion.close()
-                print(f"Base de datos '{self.db_path}' abierta correctamente.")
-                return True
-            except sqlite3.Error as e:
-                print(f"Error al abrir la base de datos: {e}")
-                return False
+            print(f"Archivo de taxis '{self.db_path}' encontrado.")
+            return True
         else:
-            print(f"La base de datos '{self.db_path}' no existe.")
+            print(f"El archivo de taxis '{self.db_path}' no existe.")
             return False
 
 
+
+    def imprimir_taxis(self):
+        if not self.taxis_disponibles:
+            print("No hay taxis disponibles.")
+        else:
+            for taxi_id, taxi_info in self.taxis_disponibles.items():
+                print(f"Soy el taxi {taxi_id}, estoy disponible en la posición {taxi_info['posicion']}.")
+
+
+
+
 if __name__ == "__main__":
-    puerto_escucha = 5000  # EJEMPLO
-    broker_ip = "localhost:9092"  # HABRA QUE CAMBIARLO
-    db_path = "taxis.db"  # Ruta a la base de datos SQLite
+    puerto_escucha = 9092  # EJEMPLO
+    broker_ip = "localhost:9092"  # 9092 puerto KAFKA
+    db_path = "taxis_db.json"  
     map_path = "EC_locations.json"  # Aquí habria que leerlo para evitarp roblemas
 
     # Instanciar la central
@@ -293,10 +674,17 @@ if __name__ == "__main__":
     # Cargar taxis y localizaciones desde archivos y base de datos
     ec_central.cargar_localizaciones()
     ec_central.cargar_taxis_desde_bd()
+    ec_central.imprimir_taxis()
 
+    
+    # Iniciar el hilo de actualización de pygame
+    threading.Thread(target=ec_central.actualizar_pygame, daemon=True).start()
+    threading.Thread(target=ec_central.procesar_comandos_arbitrarios, daemon=True).start()
+    
     # Comenzar a escuchar peticiones de Kafka
     try:
         print("EC_Central está iniciando y escuchando peticiones...")
         ec_central.escuchar_peticiones()  # Este método nunca finaliza, ya que escucha constantemente
     except KeyboardInterrupt:
         print("EC_Central detenido manualmente.")
+        pygame.quit()
