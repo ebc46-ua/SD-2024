@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import json
 import time
 from kafka import KafkaProducer, KafkaConsumer
@@ -8,7 +9,7 @@ class ECCustomer:
         self.requests_path = requests_path
         self.producer = KafkaProducer(bootstrap_servers=[self.broker_ip])
         self.consumer = KafkaConsumer('respuestas_clientes', bootstrap_servers=[self.broker_ip], group_id='clientes')
-        self.cliente_id = 1  # Asignamos un ID único al cliente
+        self.cliente_id = 1  # Asignamos un ID ï¿½nico al cliente
         self.solicitudes_pendientes = []  # Lista de solicitudes pendientes por cliente
         
     def cargar_solicitudes(self):
@@ -30,7 +31,7 @@ class ECCustomer:
             self.producer.send('solicitudes', json.dumps(mensaje).encode())
             print(f"[CLIENTE {self.cliente_id}] Solicitud enviada para destino {destino_id}")
         else:
-            print(f"[CLIENTE {self.cliente_id}] No hay más solicitudes pendientes.")
+            print(f"[CLIENTE {self.cliente_id}] No hay mï¿½s solicitudes pendientes.")
 
 
     def escuchar_respuestas(self):
@@ -41,7 +42,7 @@ class ECCustomer:
             estado = respuesta.get('estado')
             if cliente_id_respuesta == self.cliente_id:
                 if estado == 'OK':
-                    print(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi está en camino.")
+                    print(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi estï¿½ en camino.")
                 elif estado == 'KO':
                     print(f"[CLIENTE {cliente_id_respuesta}] Lo sentimos, no hay taxis disponibles en este momento.")
                 elif estado == 'COMPLETED':
@@ -51,7 +52,7 @@ class ECCustomer:
                         time.sleep(4)
                         self.enviar_solicitud()
                     else:
-                        print(f"[CLIENTE {cliente_id_respuesta}] No hay más solicitudes pendientes.")
+                        print(f"[CLIENTE {cliente_id_respuesta}] No hay mï¿½s solicitudes pendientes.")
                 else:
                     print(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
 
@@ -68,5 +69,5 @@ if __name__ == "__main__":
     requests_path = "EC_Requests.json"
     ec_customer = ECCustomer(broker_ip, requests_path)
     
-    ec_customer.enviar_solicitudes()
+    # ec_customer.enviar_solicitud()
     ec_customer.iniciar()

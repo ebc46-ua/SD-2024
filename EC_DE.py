@@ -15,7 +15,10 @@ class EC_DE:
         self.stopped_by_command = False  # Indica si el taxi está detenido por un comando
         self.destino_actual = None
         self.autenticar()
+        self.inicio_sensores()
 
+
+    def inicio_sensores(self):
         threading.Thread(target=self.iniciar_servidor_sensores, daemon=True).start()
     
     def autenticar(self):
@@ -36,6 +39,7 @@ class EC_DE:
                 print("[EC_DE] Autenticación exitosa.")
                 # Iniciar hilo para escuchar instrucciones
                 threading.Thread(target=self.escuchar_instrucciones, daemon=True).start()
+                print('')
             else:
                 print("[EC_DE] Autenticación fallida.")
                 self.socket_central.close()
@@ -47,6 +51,7 @@ class EC_DE:
     def escuchar_instrucciones(self):
         try:
             while True:
+                print('AAA')
                 mensaje = self.socket_central.recv(1024).decode()
                 if mensaje:
                     print(f"[EC_DE] Mensaje recibido: {mensaje}")
@@ -81,6 +86,7 @@ class EC_DE:
                     else:
                         print("[EC_DE] Formato de mensaje incorrecto.")
                 else:
+
                     break
         except Exception as e:
             print(f"[EC_DE] Conexión cerrada: {e}")
@@ -220,7 +226,7 @@ class EC_DE:
 if __name__ == "__main__":
     central_ip = 'localhost'
     central_puerto = 2181  # Puerto donde EC_Central está escuchando
-    taxi_id = '1'
+    taxi_id = 'taxi1'
     token = 'token1'  # Reemplaza con el token correcto
 
     ec_de = EC_DE(central_ip, central_puerto, taxi_id, token)

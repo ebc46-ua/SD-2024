@@ -1,5 +1,22 @@
 [
-    {"id": "taxi1", "status": "avaliable"},
-    {"id": "taxi2", "status": "avaliable"},
-    {"id": "taxi3", "status": "avaliable"}
+    {
+        "id": "taxi1",
+        "token": "token1",
+        "estado": "FREE",
+        "alias": "Taxitaxi1",
+        "posicion": [
+            1,
+            1
+        ]
+    },
+    {
+        "id": "taxi2",
+        "token": "token2",
+        "estado": "FREE",
+        "alias": "Taxitaxi2",
+        "posicion": [
+            1,
+            2
+        ]
+    }
 ]

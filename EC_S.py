@@ -9,12 +9,19 @@ class EC_S:
         self.de_port = de_port
         self.connect_to_ec_de()
 
-    def connect_to_ec(self):
+    def connect_to_ec_de(self):
         self.socket_de = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket_de.connect((self.de_ip, self.de_port))
-        print("[EC_S] Conectado al EC_DE.")
-        # Iniciar el envío de datos de sensores
-        threading.Thread(target=self.send_sensor_data, daemon=True).start()
+        try:
+            self.socket_de.connect((self.de_ip, self.de_port))
+            print("[EC_S] Conectado al EC_DE.")
+            # Iniciar el envÃ­o de datos de sensores
+            threading.Thread(target=self.send_sensor_data, daemon=True).start()
+        except ConnectionRefusedError:
+            print(f"[EC_S] No se pudo conectar a EC_DE en {self.de_ip}:{self.de_port}. AsegÃºrate de que EC_DE estÃ© en ejecuciÃ³n.")
+            exit(1)
+        except Exception as e:
+            print(f"[EC_S] OcurriÃ³ un error al intentar conectarse: {e}")
+            exit(1)
 
     def calcular_lrc(self, data):
         lrc = 0
@@ -44,10 +51,10 @@ class EC_S:
                 print("[EC_S] ACK recibido del EC_DE.")
 
 if __name__ == "__main__":
-    ec_de_ip = 'localhost'  # IP donde está ejecutándose EC_DE
-    ec_de_port = 2181       # Puerto para la comunicación entre EC_S y EC_DE
+    ec_de_ip = 'localhost'  # IP donde estï¿½ ejecutï¿½ndose EC_DE
+    ec_de_port = 8888       # Puerto para la comunicaciï¿½n entre EC_S y EC_DE
 
     ec_s = EC_S(ec_de_ip, ec_de_port)
-    # Mantener el programa en ejecución
+    # Mantener el programa en ejecuciï¿½n
     while True:
         time.sleep(1)

@@ -219,9 +219,9 @@ class ECCentral:
             elif taxi_info['estado'] == 'STOPPED':
                 color_taxi = (255, 255, 0)  # Amarillo para estado STOPPED
             elif taxi_info['estado'] == 'END':
-                color_taxi = (255, 0, 0)  # Magenta para estado BUSY
+                color_taxi = (255, 0, 255)  # Magenta para estado BUSY
             else:
-                color_taxi = (255, 0, 255)  # Morado para estado desconocido
+                color_taxi = (255, 0, 0)  # Morado para estado desconocido
             pygame.draw.rect(self.ventana, color_taxi, rect)
             
             img = font.render(str(taxi_id), True, (255, 255, 255))
@@ -232,7 +232,7 @@ class ECCentral:
     def actualizar_pygame(self):
         while True:
             self.dibujar_mapa()
-            time.sleep(0.1)  # Pequeña pausa para no saturar la CPU
+            #time.sleep(0.1)  # Pequeña pausa para no saturar la CPU
             
             
     def cargar_localizaciones(self):
@@ -658,7 +658,7 @@ class ECCentral:
 
 
 if __name__ == "__main__":
-    puerto_escucha = 9092  # EJEMPLO
+    puerto_escucha = 2181  # EJEMPLO
     broker_ip = "localhost:9092"  # 9092 puerto KAFKA
     db_path = "taxis_db.json"  
     map_path = "EC_locations.json"  # Aquí habria que leerlo para evitarp roblemas
