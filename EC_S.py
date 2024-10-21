@@ -32,7 +32,7 @@ class EC_S:
     def send_sensor_data(self):
         while True:
             time.sleep(1)
-            # Simular sensor con 20% de probabilidad de contingencia
+            # Simular sensor con 20% de probabilidad de contingencia NO SIMULAR, TIENE QUE SER USANDO EL TECLADO LA CONTINGENCIA
             if random.randint(1, 5) == 1:
                 sensor_status = 'CONTINGENCY'
             else:
