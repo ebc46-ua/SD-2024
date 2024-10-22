@@ -8,6 +8,7 @@ from pygame import *
 import pygame
 import threading
 from kafka import KafkaProducer, KafkaConsumer 
+import argparse
  
 class ECCentral:
     def __init__(self, puerto_escucha, broker_ip, db_path, map_path):
@@ -131,6 +132,7 @@ class ECCentral:
         try:
             while True:
                 mensaje = cliente_socket.recv(1024).decode()
+                print('Gestinando taxi \n')
                 if mensaje:
                     # Procesar mensajes del taxi
                     # Por ejemplo, actualizaciones de posición
@@ -177,6 +179,7 @@ class ECCentral:
                     else:
                         cliente_socket.send('NACK'.encode())
                 else:
+                    print('Acaba bucle \n')
                     break
         except Exception as e:
             print(f"[CENTRAL] Conexión con taxi {taxi_id} cerrada: {e}")
@@ -658,10 +661,20 @@ class ECCentral:
 
 
 if __name__ == "__main__":
-    puerto_escucha = 2181  # EJEMPLO
-    broker_ip = "localhost:9092"  # 9092 puerto KAFKA
-    db_path = "taxis_db.json"  
-    map_path = "EC_locations.json"  # Aquí habria que leerlo para evitarp roblemas
+
+    parser = argparse.ArgumentParser(description="Ejecutar EC_Central con parámetros de conexión y autenticación.")
+
+    parser.add_argument('puerto_escucha', type=int, default=2181, help='Puerto de escucha de EC_Central')
+    parser.add_argument('broker_ip', type=str, default='localhost:9092', help='Ip del Broker')
+    parser.add_argument('db_path', type=str, default='taxis_db.json', help='BD de los taxis')
+
+    args = parser.parse_args()
+
+    puerto_escucha = args.puerto_escucha
+    broker_ip = args.broker_ip
+    db_path = args.db_path
+
+    map_path = "EC_locations.json"  # Aquí habria que leerlo para evitar problemas
 
     # Instanciar la central
     ec_central = ECCentral(puerto_escucha, broker_ip, db_path, map_path)

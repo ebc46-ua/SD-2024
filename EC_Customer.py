@@ -2,14 +2,15 @@
 import json
 import time
 from kafka import KafkaProducer, KafkaConsumer
+import argparse
 
 class ECCustomer:
-    def __init__(self, broker_ip, requests_path):
+    def __init__(self, broker_ip, requests_path, cliente_id):
         self.broker_ip = broker_ip
         self.requests_path = requests_path
         self.producer = KafkaProducer(bootstrap_servers=[self.broker_ip])
         self.consumer = KafkaConsumer('respuestas_clientes', bootstrap_servers=[self.broker_ip], group_id='clientes')
-        self.cliente_id = 1  # Asignamos un ID �nico al cliente
+        self.cliente_id = cliente_id  # Asignamos un ID �nico al cliente
         self.solicitudes_pendientes = []  # Lista de solicitudes pendientes por cliente
         
     def cargar_solicitudes(self):
@@ -65,9 +66,20 @@ class ECCustomer:
 
 
 if __name__ == "__main__":
-    broker_ip = "localhost:9092"  # Ajustar si es necesario
+
+    parser = argparse.ArgumentParser(description="Ejecutar EC_Customer con parámetros de conexión y autenticación.")
+
+    parser.add_argument('broker_ip', type=str, default='localhost:9092', help='IP del Broker de Kafka')       # Broker IP y Puerto
+    parser.add_argument('cliente_id', type=int, default=1, help='ID del cliente') 
+
+    args = parser.parse_args()
+
+    broker_ip = args.broker_ip
+    cliente_id = args.cliente_id
+
     requests_path = "EC_Requests.json"
-    ec_customer = ECCustomer(broker_ip, requests_path)
+
+    ec_customer = ECCustomer(broker_ip, requests_path, cliente_id)
     
     # ec_customer.enviar_solicitud()
     ec_customer.iniciar()

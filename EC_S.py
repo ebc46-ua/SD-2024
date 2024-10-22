@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 import random
+import argparse
 
 class EC_S:
     def __init__(self, de_ip, de_port):
@@ -51,10 +52,20 @@ class EC_S:
                 print("[EC_S] ACK recibido del EC_DE.")
 
 if __name__ == "__main__":
-    ec_de_ip = 'localhost'  # IP donde est� ejecut�ndose EC_DE
-    ec_de_port = 8888       # Puerto para la comunicaci�n entre EC_S y EC_DE
 
-    ec_s = EC_S(ec_de_ip, ec_de_port)
+    parser = argparse.ArgumentParser(description="Ejecutar EC_S con parámetros de conexión y autenticación.")
+    
+    parser.add_argument('de_ip', type=str, default='localhost', help='IP de EC_DE')   # Central IP y puerto
+    parser.add_argument('de_port', type=int, default=8888, help='Puerto de EC_DE')
+
+    # Parsear los argumentos de la línea de comandos
+    args = parser.parse_args()
+    
+    # Usar los argumentos para instanciar EC_DE
+    de_ip = args.de_port
+    de_port = args.de_port
+
+    ec_s = EC_S(de_ip, de_port)
     # Mantener el programa en ejecuci�n
     while True:
         time.sleep(1)

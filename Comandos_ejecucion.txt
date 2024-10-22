@@ -1,0 +1,16 @@
+# Comandos de ejecución por defecto para probar el programa en localhost
+
+EC_Central: (puerto_escucha, broker_ip, db_path)
+
+python3 EC_Central.py 2181 localhost:9092 taxis_db.json
+
+EC_DE: (central_ip, central_puerto, sensores_ip, sensores_puerto, taxi_id, broker_ip, broker_puerto)
+
+python3 EC_DE.py localhost 2181 localhost 8888 taxi1 localhost 9092
+
+EC_S: (de_ip, de_port)
+python3 EC_S.py localhost 8888
+
+EC_Customer: (broker_ip, cliente_id)
+python3 EC_Customer.py localhost:9092 1
+

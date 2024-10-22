@@ -2,11 +2,14 @@ import socket
 import threading
 import time
 import json
+import argparse
 
 class EC_DE:
-    def __init__(self, central_ip, central_puerto, taxi_id, token):
+    def __init__(self, central_ip, central_puerto, sensores_ip, sensores_puerto, taxi_id, token):
         self.central_ip = central_ip
         self.central_puerto = central_puerto
+        self.sensores_ip = sensores_ip
+        self.sensores_puerto = sensores_puerto
         self.taxi_id = taxi_id
         self.token = token
         self.posicion = (1, 1)
@@ -16,6 +19,7 @@ class EC_DE:
         self.destino_actual = None
         self.autenticar()
         self.inicio_sensores()
+
 
 
     def inicio_sensores(self):
@@ -39,7 +43,6 @@ class EC_DE:
                 print("[EC_DE] Autenticación exitosa.")
                 # Iniciar hilo para escuchar instrucciones
                 threading.Thread(target=self.escuchar_instrucciones, daemon=True).start()
-                print('')
             else:
                 print("[EC_DE] Autenticación fallida.")
                 self.socket_central.close()
@@ -51,7 +54,6 @@ class EC_DE:
     def escuchar_instrucciones(self):
         try:
             while True:
-                print('AAA')
                 mensaje = self.socket_central.recv(1024).decode()
                 if mensaje:
                     print(f"[EC_DE] Mensaje recibido: {mensaje}")
@@ -86,8 +88,7 @@ class EC_DE:
                     else:
                         print("[EC_DE] Formato de mensaje incorrecto.")
                 else:
-
-                    break
+                    print("Conexion cerrada por el servidor")
         except Exception as e:
             print(f"[EC_DE] Conexión cerrada: {e}")
             self.socket_central.close()
@@ -107,7 +108,7 @@ class EC_DE:
     
     def iniciar_servidor_sensores(self):
         self.servidor_sensores = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.servidor_sensores.bind(('localhost', 8888))  # Puerto para comunicación con EC_S
+        self.servidor_sensores.bind((self.sensores_ip, self.sensores_puerto))  # Puerto para comunicación con EC_S
         self.servidor_sensores.listen(1)
         print("[EC_DE] Esperando conexión de EC_S...")
         sensor_socket, direccion = self.servidor_sensores.accept()
@@ -224,9 +225,32 @@ class EC_DE:
     
 
 if __name__ == "__main__":
-    central_ip = 'localhost'
-    central_puerto = 2181  # Puerto donde EC_Central está escuchando
-    taxi_id = 'taxi1'
+
+    parser = argparse.ArgumentParser(description="Ejecutar EC_DE con parámetros de conexión y autenticación.")
+    
+    parser.add_argument('central_ip', type=str, default='localhost', help='IP de EC_Central')   # Central IP y puerto
+    parser.add_argument('central_puerto', type=int, default=2181, help='Puerto de EC_Central')
+    parser.add_argument('sensores_ip', type=str, default='localhost', help='IP de EC_S')        # Sensores IP y Puerto
+    parser.add_argument('sensores_puerto', type=int, default=8888, help='Puerto de EC_S')
+    parser.add_argument('taxi_id', type=str, default='taxi1', help='ID del taxi')               # Taxi ID
+
+    parser.add_argument('broker_ip', type=str, default='localhost', help='IP del Broker de Kafka')                   # Broker IP y Puerto
+    parser.add_argument('broker_puerto', type=int, default=9092, help='Puerto del Broker de Kafka')
+
+    # Parsear los argumentos de la línea de comandos
+    args = parser.parse_args()
+    
+    # Usar los argumentos para instanciar EC_DE
+    central_ip = args.central_ip
+    central_puerto = args.central_puerto
+    sensores_ip = args.sensores_ip
+    sensores_puerto = args.sensores_puerto
+    taxi_id = args.taxi_id
+
+    broker_ip = args.broker_ip
+    broker_puerto = args.broker_puerto
+
     token = 'token1'  # Reemplaza con el token correcto
 
-    ec_de = EC_DE(central_ip, central_puerto, taxi_id, token)
+
+    ec_de = EC_DE(central_ip, central_puerto, sensores_ip, sensores_puerto, taxi_id, token)
