@@ -62,7 +62,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Usar los argumentos para instanciar EC_DE
-    de_ip = args.de_port
+    de_ip = args.de_ip
     de_port = args.de_port
 
     ec_s = EC_S(de_ip, de_port)
