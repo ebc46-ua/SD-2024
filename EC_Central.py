@@ -75,7 +75,6 @@ class ECCentral:
                     campos = data.split('#')
                     if campos[0] == 'AUTH':
                         taxi_id = campos[1]
-                        token = campos[2]
                         datos_taxi = {'id': taxi_id}
                         if self.autentifica(datos_taxi):
                             cliente_socket.send('ACK'.encode())
@@ -183,12 +182,39 @@ class ECCentral:
         except Exception as e:
             print(f"[CENTRAL] Error en la conexión con taxi {taxi_id}: {e}")
             cliente_socket.close()
-            if taxi_id in self.sockets_taxis:
-                del self.sockets_taxis[taxi_id]
-            if taxi_id in self.taxis_autenticados:
-                del self.taxis_autenticados[taxi_id]
+            # Iniciar temporizador de 10 segundos antes de marcar incidencia
+            threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
+            del self.sockets_taxis[taxi_id]
+            del self.taxis_autenticados[taxi_id]
+            if taxi_id in self.taxis_disponibles:
+                del self.taxis_disponibles[taxi_id]
             self.dibujar_mapa()
             self.enviar_mapa_actualizado()
+    
+    def esperar_reconexion_taxi(self, taxi_id):
+        print(f"[CENTRAL] Esperando 10 segundos por reconexión del taxi {taxi_id}...")
+        time_start = time.time()
+        while time.time() - time_start < 10:
+            if taxi_id in self.taxis_autenticados:
+                print(f"[CENTRAL] Taxi {taxi_id} se ha reconectado.")
+                return
+            time.sleep(1)
+        # Si no se reconecta, marcar incidencia
+        print(f"[CENTRAL] Taxi {taxi_id} no se ha reconectado en 10 segundos. Marcando incidencia.")
+        if taxi_id in self.taxis_autenticados:
+            del self.taxis_autenticados[taxi_id]
+        if taxi_id in self.sockets_taxis:
+            del self.sockets_taxis[taxi_id]
+        if taxi_id in self.taxis_disponibles:
+            del self.taxis_disponibles[taxi_id]
+        self.dibujar_mapa()
+        self.enviar_mapa_actualizado()
+        # Notificar al cliente si el taxi estaba asignado
+        cliente_id = self.taxi_cliente.get(taxi_id)
+        if cliente_id:
+            self.enviar_mensaje_cliente(cliente_id, 'TAXI_DISCONNECTED')
+            del self.taxi_cliente[taxi_id]
+            
             
     def dibujar_mapa(self):
         for evento in pygame.event.get():
@@ -255,19 +281,38 @@ class ECCentral:
             print(f"Error cargando las localizaciones: {e}")
                 
     def cargar_taxis_desde_bd(self):
-        # Lee el archivo taxis_db.json y carga los taxis en el mapa y en la lista de taxis disponibles
         try:
-            with open('taxis_db.json', 'r') as archivo_taxis:
+            with open(self.db_path, 'r') as archivo_taxis:
                 taxis_data = json.load(archivo_taxis)
                 for taxi in taxis_data:
                     taxi_id = taxi['id']
+                    estado = taxi.get('estado', 'FREE')
+                    posicion = taxi.get('posicion', [1, 1])
+
+                    # Validar estado
+                    if estado not in ['FREE', 'BUSY', 'STOPPED', 'END']:
+                        print(f"Estado '{estado}' no reconocido para el taxi {taxi_id}. Taxi omitido.")
+                        continue
+
+                    # Validar posición
+                    x, y = posicion
+                    if not (0 <= x < 20 and 0 <= y < 20):
+                        print(f"Posición {posicion} fuera del mapa para el taxi {taxi_id}. Taxi omitido.")
+                        continue
+
+                    # Verificar ID duplicado
+                    if taxi_id in self.taxis_disponibles:
+                        print(f"Taxi con id {taxi_id} ya cargado. Taxi omitido.")
+                        continue
+
                     self.taxis_disponibles[taxi_id] = {
-                        'estado': taxi['estado'],
-                        'posicion': [1, 1]  # Todos los taxis comienzan en la posición [1, 1]
+                        'estado': estado,
+                        'posicion': posicion
                     }
                 print("Taxis cargados correctamente.")
         except Exception as e:
             print(f"Error cargando los taxis: {e}")
+
         
 
     def inicializar_kafka(self):
@@ -314,7 +359,7 @@ class ECCentral:
             print(f"Error cargando el mapa: {e}")
 
     def autentifica(self, datos_taxi):
-        # Autenticar taxi usando su ID y token
+        # Autenticar taxi usando su ID
         try:
             # Cargar taxis existentes desde el archivo JSON
             with open(self.db_path, 'r') as archivo_taxis:
@@ -322,50 +367,48 @@ class ECCentral:
         except Exception as e:
             print(f"Error cargando los taxis: {e}")
             taxis_data = []
-
+        
         # Verificar si el taxi ya está registrado
         taxi_encontrado = None
         for taxi in taxis_data:
             if taxi['id'] == datos_taxi['id']:
                 taxi_encontrado = taxi
                 break
+        
+        # Validar si el taxi ya está autenticado y conectado
+        if datos_taxi['id'] in self.taxis_autenticados:
+            print(f"Taxi con id {datos_taxi['id']} ya está autenticado y conectado.")
+            return False
 
         if taxi_encontrado:
-            # Verificar si el token coincide
-            if taxi_encontrado['token'] == datos_taxi['token']:
-                print(f"El taxi con id {datos_taxi['id']} ha accedido al sistema.")
-            else:
-                print(f"Autenticación fallida para el taxi con id {datos_taxi['id']}. Token incorrecto.")
-                return False
+            print(f"El taxi con id {datos_taxi['id']} ha accedido al sistema.")
         else:
-            # Si el taxi no está registrado, añadirlo al archivo JSON
-            nuevo_taxi = {
-                "id": datos_taxi['id'],
-                "token": datos_taxi['token'],
-                "estado": "FREE",
-                "alias": f"Taxi{datos_taxi['id']}",
-                "posicion": datos_taxi.get('posicion', [1, 1])
-            }
-            taxis_data.append(nuevo_taxi)
-            print(f"Nuevo taxi con id {datos_taxi['id']} registrado y autenticado.")
+            print(f"El taxi con id {datos_taxi['id']} no está registrado en la base de datos.")
+            return False
 
-            # Guardar el nuevo taxi en el archivo JSON
-            try:
-                with open(self.db_path, 'w') as archivo_taxis:
-                    json.dump(taxis_data, archivo_taxis, indent=4)
-                print(f"Base de datos '{self.db_path}' actualizada con el nuevo taxi.")
-            except Exception as e:
-                print(f"Error al guardar el nuevo taxi: {e}")
-                return False
+        # Validar el estado del taxi
+        estado_valido = taxi_encontrado['estado'] in ['FREE', 'BUSY', 'STOPPED', 'END']
+        if not estado_valido:
+            print(f"Estado '{taxi_encontrado['estado']}' no reconocido para el taxi {datos_taxi['id']}.")
+            return False
+
+        # Validar la posición del taxi
+        x, y = taxi_encontrado['posicion']
+        if not (0 <= x < 20 and 0 <= y < 20):
+            print(f"Posición {taxi_encontrado['posicion']} fuera del mapa para el taxi {datos_taxi['id']}.")
+            return False
 
         # Añadir el taxi a taxis_autenticados y taxis_disponibles
         taxi_autenticado = {
             "id": datos_taxi['id'],
-            "posicion": datos_taxi.get('posicion', [1, 1]),
-            "estado": "FREE"
+            "posicion": taxi_encontrado['posicion'],
+            "estado": taxi_encontrado['estado']
         }
         self.taxis_autenticados[datos_taxi['id']] = taxi_autenticado
         self.taxis_disponibles[datos_taxi['id']] = taxi_autenticado
+         # Si el taxi ya estaba asignado a un cliente, restaurar la asociación
+        if datos_taxi['id'] in self.taxi_cliente:
+            print(f"[CENTRAL] Taxi {datos_taxi['id']} reconectado y restaurando servicio al cliente.")
         return True
 
 

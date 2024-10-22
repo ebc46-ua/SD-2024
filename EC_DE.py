@@ -5,13 +5,12 @@ import json
 import argparse
 
 class EC_DE:
-    def __init__(self, central_ip, central_puerto, sensores_ip, sensores_puerto, taxi_id, token):
+    def __init__(self, central_ip, central_puerto, sensores_ip, sensores_puerto, taxi_id):
         self.central_ip = central_ip
         self.central_puerto = central_puerto
         self.sensores_ip = sensores_ip
         self.sensores_puerto = sensores_puerto
         self.taxi_id = taxi_id
-        self.token = token
         self.posicion = (1, 1)
         self.sensor_status = 'OK'  # Estado inicial de los sensores
         self.stopped = False  # Indica si el taxi está detenido por contingencia
@@ -31,9 +30,15 @@ class EC_DE:
             self.socket_central = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket_central.connect((self.central_ip, self.central_puerto))
 
-            # Paso 1: Enviar ENQ
-            print("[EC_DE] Enviando solicitud de autenticación (ENQ)...")
-            self.socket_central.send('ENQ'.encode())
+        # Paso 1: Enviar ENQ
+        self.socket_central.send('ENQ'.encode())
+        respuesta = self.socket_central.recv(1024).decode()
+        if respuesta == 'ACK':
+            # Paso 2: Enviar solicitud de autenticación
+            data = f'AUTH#{self.taxi_id}'
+            lrc = self.calcular_lrc(data)
+            mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
+            self.socket_central.send(mensaje.encode())
             respuesta = self.socket_central.recv(1024).decode()
             print(f"[EC_DE] Respuesta de la central: {respuesta}")
 
@@ -185,11 +190,16 @@ class EC_DE:
                 data = f'POS#{self.posicion[0]}#{self.posicion[1]}'
                 lrc = self.calcular_lrc(data)
                 mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
-                self.socket_central.send(mensaje.encode())
-                # Esperar ACK
-                respuesta = self.socket_central.recv(1024).decode()
-                if respuesta != 'ACK':
-                    print("[EC_DE] Error al enviar posición.")
+                try:
+                    self.socket_central.send(mensaje.encode())
+                    # Esperar ACK
+                    respuesta = self.socket_central.recv(1024).decode()
+                    if respuesta != 'ACK':
+                        print("[EC_DE] Error al enviar posición.")
+                except Exception as e:
+                    print(f"[EC_DE] No se pudo enviar posición a EC_Central: {e}")
+                    self.conectado_central = False
+                    threading.Thread(target=self.reconectar_central, daemon=True).start()
                 time.sleep(0.5)  # Simular movimiento en tiempo real
             else:
                 if not self.stopped:
@@ -199,24 +209,52 @@ class EC_DE:
                 print("[EC_DE] Taxi detenido debido a una contingencia.")
                 time.sleep(1)
         print("[EC_DE] Llegué al destino.")
-        # Cambiar estado a 'END' y notificar a EC_Central
+        # Cambiar estado a 'END' y notificar a EC_Central si está conectado
         self.state = 'END'
-        self.enviar_estado('END')
-        # Esperar nuevas instrucciones
+        if self.conectado_central:
+            self.enviar_estado('END')
+        else:
+            print("[EC_DE] No hay conexión con EC_Central. Taxi detenido.")
+        # Esperar nuevas instrucciones solo si está conectado
+        if self.conectado_central:
+            print("[EC_DE] Esperando nuevas instrucciones de EC_Central.")
+        else:
+            print("[EC_DE] No se puede continuar sin conexión a EC_Central.")
+
+
+    def reconectar_central(self):
+        while not self.conectado_central:
+            try:
+                self.socket_central = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket_central.connect((self.central_ip, self.central_puerto))
+                print("[EC_DE] Reconectado a EC_Central.")
+                self.conectado_central = True
+                self.autenticar()
+                # Reanudar escuchando instrucciones
+                threading.Thread(target=self.escuchar_instrucciones, daemon=True).start()
+            except Exception as e:
+                print(f"[EC_DE] No se pudo reconectar a EC_Central: {e}")
+                time.sleep(5)
+
+   
 
 
     def enviar_estado(self, estado):
         data = f'STATUS#{estado}'
         lrc = self.calcular_lrc(data)
         mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
-        self.socket_central.send(mensaje.encode())
-        # Esperar ACK
-        respuesta = self.socket_central.recv(1024).decode()
-        if respuesta != 'ACK':
-            print("[EC_DE] Error al enviar estado.")
-        else:
-            print(f"[EC_DE] Estado '{estado}' enviado a EC_Central.")
-
+        try:
+            self.socket_central.send(mensaje.encode())
+            # Esperar ACK
+            respuesta = self.socket_central.recv(1024).decode()
+            if respuesta != 'ACK':
+                print("[EC_DE] Error al enviar estado.")
+            else:
+                print(f"[EC_DE] Estado '{estado}' enviado a EC_Central.")
+        except Exception as e:
+            print(f"[EC_DE] No se pudo enviar estado a EC_Central: {e}")
+            self.conectado_central = False
+            threading.Thread(target=self.reconectar_central, daemon=True).start()
     
     def calcular_siguiente_paso(self, posicion_actual, destino):
         x_actual, y_actual = posicion_actual
@@ -264,7 +302,6 @@ if __name__ == "__main__":
     broker_ip = args.broker_ip
     broker_puerto = args.broker_puerto
 
-    token = 'token1'  # Reemplaza con el token correcto
 
 
-    ec_de = EC_DE(central_ip, central_puerto, sensores_ip, sensores_puerto, taxi_id, token)
+    ec_de = EC_DE(central_ip, central_puerto, sensores_ip, sensores_puerto, taxi_id)

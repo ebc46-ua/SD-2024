@@ -65,13 +65,13 @@ class EC_S:
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Ejecutar EC_S con parámetros de conexión.")
+
     parser.add_argument('de_ip', type=str, help='IP de EC_DE')   # IP de EC_DE
     parser.add_argument('de_port', type=int, help='Puerto de EC_DE')
 
-
     # Parsear los argumentos de la línea de comandos
     args = parser.parse_args()
-    
+
     # Usar los argumentos para instanciar EC_S
     de_ip = args.de_ip
     de_port = args.de_port
@@ -80,3 +80,4 @@ if __name__ == "__main__":
     # Mantener el programa en ejecución
     while True:
         time.sleep(1)
+
