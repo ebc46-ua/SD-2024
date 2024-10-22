@@ -76,10 +76,10 @@ class ECCentral:
                     if campos[0] == 'AUTH':
                         taxi_id = campos[1]
                         token = campos[2]
-                        datos_taxi = {'id': taxi_id, 'token': token}
+                        datos_taxi = {'id': taxi_id}
                         if self.autentifica(datos_taxi):
                             cliente_socket.send('ACK'.encode())
-                             # Almacenar el socket del taxi
+                            # Almacenar el socket del taxi
                             self.sockets_taxis[taxi_id] = cliente_socket
                             # Mantener comunicación con el taxi
                             threading.Thread(target=self.gestionar_taxi, args=(cliente_socket, taxi_id), daemon=True).start()
@@ -99,7 +99,7 @@ class ECCentral:
     def verificar_lrc(self, data, lrc):
         # Implementar la verificación del LRC
         calculated_lrc = self.calcular_lrc(data)
-        return calculated_lrc == lrc
+        return calculated_lrc == lrc    
 
     def calcular_lrc(self, data):
         # Calcular LRC como XOR de los bytes
@@ -132,12 +132,10 @@ class ECCentral:
         try:
             while True:
                 mensaje = cliente_socket.recv(1024).decode()
-                print('Gestinando taxi \n')
+                print(f"[CENTRAL] Gestionando taxi {taxi_id}. Mensaje recibido: '{mensaje}'")  # Depuración
                 if mensaje:
                     # Procesar mensajes del taxi
-                    # Por ejemplo, actualizaciones de posición
-                    print(f"[CENTRAL] Mensaje recibido de taxi {taxi_id}: {mensaje}")
-                    # Extraer <STX>, <DATA>, <ETX>, <LRC>
+                    print(f"[CENTRAL] Procesando mensaje de taxi {taxi_id}: {mensaje}")
                     stx_index = mensaje.find('<STX>')
                     etx_index = mensaje.find('<ETX>')
                     lrc_index = mensaje.find('<LRC>')
@@ -179,13 +177,16 @@ class ECCentral:
                     else:
                         cliente_socket.send('NACK'.encode())
                 else:
-                    print('Acaba bucle \n')
+                    # Si no recibimos ningún mensaje, el cliente puede haber cerrado la conexión
+                    print(f"[CENTRAL] Taxi {taxi_id} cerró la conexión (mensaje vacío).")
                     break
         except Exception as e:
-            print(f"[CENTRAL] Conexión con taxi {taxi_id} cerrada: {e}")
+            print(f"[CENTRAL] Error en la conexión con taxi {taxi_id}: {e}")
             cliente_socket.close()
-            del self.sockets_taxis[taxi_id]
-            del self.taxis_autenticados[taxi_id]
+            if taxi_id in self.sockets_taxis:
+                del self.sockets_taxis[taxi_id]
+            if taxi_id in self.taxis_autenticados:
+                del self.taxis_autenticados[taxi_id]
             self.dibujar_mapa()
             self.enviar_mapa_actualizado()
             
