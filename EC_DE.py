@@ -30,27 +30,22 @@ class EC_DE:
             self.socket_central = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket_central.connect((self.central_ip, self.central_puerto))
 
-        # Paso 1: Enviar ENQ
-        self.socket_central.send('ENQ'.encode())
-        respuesta = self.socket_central.recv(1024).decode()
-        if respuesta == 'ACK':
-            # Paso 2: Enviar solicitud de autenticación
-            data = f'AUTH#{self.taxi_id}'
-            lrc = self.calcular_lrc(data)
-            mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
-            self.socket_central.send(mensaje.encode())
+            # Paso 1: Enviar ENQ
+            self.socket_central.send('ENQ'.encode())
             respuesta = self.socket_central.recv(1024).decode()
-            print(f"[EC_DE] Respuesta de la central: {respuesta}")
 
             if respuesta == 'ACK':
-                # Paso 2: Enviar solicitud de autenticación
-                data = f'AUTH#{self.taxi_id}#{self.token}'
+                # Paso 2: Enviar solicitud de autenticación (solo una vez)
+                data = f'AUTH#{self.taxi_id}'
                 lrc = self.calcular_lrc(data)
                 mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
                 print(f"[EC_DE] Enviando mensaje de autenticación: {mensaje}")
                 self.socket_central.send(mensaje.encode())
+
+                # Recibir respuesta de autenticación
                 respuesta = self.socket_central.recv(1024).decode()
                 print(f"[EC_DE] Respuesta de autenticación de la central: {respuesta}")
+
                 if respuesta == 'ACK':
                     print("[EC_DE] Autenticación exitosa.")
                     # Iniciar hilo para escuchar instrucciones
@@ -61,9 +56,11 @@ class EC_DE:
             else:
                 print("[EC_DE] Error en la comunicación con EC_Central.")
                 self.socket_central.close()
+
         except Exception as e:
             print(f"[EC_DE] Error durante la autenticación: {e}")
             self.socket_central.close()
+
 
 
     def escuchar_instrucciones(self):
