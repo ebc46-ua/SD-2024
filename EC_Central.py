@@ -52,7 +52,6 @@ class ECCentral:
             # Paso 1: Recibir ENQ
             mensaje = cliente_socket.recv(1024).decode()
             if mensaje == 'ENQ':
-                # Enviar ACK
                 cliente_socket.send('ACK'.encode())
             else:
                 cliente_socket.send('NACK'.encode())
@@ -61,26 +60,21 @@ class ECCentral:
 
             # Paso 2: Recibir solicitud de autenticación
             mensaje = cliente_socket.recv(1024).decode()
-            # Extraer <STX>, <DATA>, <ETX>, <LRC>
             stx_index = mensaje.find('<STX>')
             etx_index = mensaje.find('<ETX>')
             lrc_index = mensaje.find('<LRC>')
 
             if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                data = mensaje[stx_index+5:etx_index]
-                lrc = mensaje[lrc_index+5:]
-                # Verificar LRC
+                data = mensaje[stx_index + 5:etx_index]
+                lrc = mensaje[lrc_index + 5:]
                 if self.verificar_lrc(data, lrc):
-                    # Procesar datos de autenticación
                     campos = data.split('#')
                     if campos[0] == 'AUTH':
                         taxi_id = campos[1]
                         datos_taxi = {'id': taxi_id}
                         if self.autentifica(datos_taxi):
                             cliente_socket.send('ACK'.encode())
-                            # Almacenar el socket del taxi
                             self.sockets_taxis[taxi_id] = cliente_socket
-                            # Mantener comunicación con el taxi
                             threading.Thread(target=self.gestionar_taxi, args=(cliente_socket, taxi_id), daemon=True).start()
                         else:
                             cliente_socket.send('NACK'.encode())
@@ -94,6 +88,8 @@ class ECCentral:
         except Exception as e:
             print(f"[CENTRAL] Error al procesar conexión de taxi: {e}")
             cliente_socket.close()
+
+
 
     def verificar_lrc(self, data, lrc):
         # Implementar la verificación del LRC
@@ -125,23 +121,26 @@ class ECCentral:
             except Exception as e:
                 print(f"[CENTRAL] Error al enviar mapa actualizado: {e}")
 
-    
     def gestionar_taxi(self, cliente_socket, taxi_id):
-        # Mantener comunicación con el taxi
         try:
             while True:
-                mensaje = cliente_socket.recv(1024).decode()
-                print(f"[CENTRAL] Gestionando taxi {taxi_id}. Mensaje recibido: '{mensaje}'")  # Depuración
-                if mensaje:
+                try:
+                    mensaje = cliente_socket.recv(1024).decode()
+                    if not mensaje:
+                        print(f"[CENTRAL] Taxi {taxi_id} cerró la conexión (mensaje vacío).")
+                        break
+
+                    print(f"[CENTRAL] Gestionando taxi {taxi_id}. Mensaje recibido: '{mensaje}'")
+                    
                     # Procesar mensajes del taxi
-                    print(f"[CENTRAL] Procesando mensaje de taxi {taxi_id}: {mensaje}")
                     stx_index = mensaje.find('<STX>')
                     etx_index = mensaje.find('<ETX>')
                     lrc_index = mensaje.find('<LRC>')
 
                     if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                        data = mensaje[stx_index+5:etx_index]
-                        lrc = mensaje[lrc_index+5:]
+                        data = mensaje[stx_index + 5:etx_index]
+                        lrc = mensaje[lrc_index + 5:]
+
                         # Verificar LRC
                         if self.verificar_lrc(data, lrc):
                             campos = data.split('#')
@@ -150,46 +149,42 @@ class ECCentral:
                                 x, y = int(campos[1]), int(campos[2])
                                 self.taxis_autenticados[taxi_id]['posicion'] = (x, y)
                                 self.dibujar_mapa()
-                                # Enviar ACK
                                 cliente_socket.send('ACK'.encode())
-                                # Enviar mapa actualizado a todos los taxis
                                 self.enviar_mapa_actualizado()
                             elif campos[0] == 'STATUS':
                                 estado = campos[1]
                                 print(f"[CENTRAL] Taxi {taxi_id} está en estado '{estado}'")
                                 self.taxis_autenticados[taxi_id]['estado'] = estado
                                 self.dibujar_mapa()
-                                # Enviar ACK
                                 cliente_socket.send('ACK'.encode())
-                                # Enviar mapa actualizado a todos los taxis
                                 self.enviar_mapa_actualizado()
-                                # Si el estado es 'END', notificar al cliente
+
                                 if estado == 'END':
-                                    cliente_id = self.taxi_cliente.get(taxi_id)
-                                    if cliente_id:
-                                        self.enviar_mensaje_cliente(cliente_id, 'COMPLETED')
-                                        del self.taxi_cliente[taxi_id]
+                                    print(f"[CENTRAL] Cerrando conexión con el taxi {taxi_id}.")
+                                    break  # Cerrar conexión
                             else:
                                 cliente_socket.send('NACK'.encode())
                         else:
                             cliente_socket.send('NACK'.encode())
                     else:
                         cliente_socket.send('NACK'.encode())
-                else:
-                    # Si no recibimos ningún mensaje, el cliente puede haber cerrado la conexión
-                    print(f"[CENTRAL] Taxi {taxi_id} cerró la conexión (mensaje vacío).")
+                except (ConnectionResetError, BrokenPipeError) as e:
+                    print(f"[CENTRAL] Error en la conexión con taxi {taxi_id}: {e}")
                     break
         except Exception as e:
-            print(f"[CENTRAL] Error en la conexión con taxi {taxi_id}: {e}")
+            print(f"[CENTRAL] Error en la gestión del taxi {taxi_id}: {e}")
+        finally:
+            # Cierre de conexiones
             cliente_socket.close()
-            # Iniciar temporizador de 10 segundos antes de marcar incidencia
-            threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
             del self.sockets_taxis[taxi_id]
             del self.taxis_autenticados[taxi_id]
             if taxi_id in self.taxis_disponibles:
                 del self.taxis_disponibles[taxi_id]
             self.dibujar_mapa()
             self.enviar_mapa_actualizado()
+
+
+
     
     def esperar_reconexion_taxi(self, taxi_id):
         print(f"[CENTRAL] Esperando 10 segundos por reconexión del taxi {taxi_id}...")
@@ -367,14 +362,14 @@ class ECCentral:
         except Exception as e:
             print(f"Error cargando los taxis: {e}")
             taxis_data = []
-        
+
         # Verificar si el taxi ya está registrado
         taxi_encontrado = None
         for taxi in taxis_data:
             if taxi['id'] == datos_taxi['id']:
                 taxi_encontrado = taxi
                 break
-        
+
         # Validar si el taxi ya está autenticado y conectado
         if datos_taxi['id'] in self.taxis_autenticados:
             print(f"Taxi con id {datos_taxi['id']} ya está autenticado y conectado.")
@@ -406,7 +401,7 @@ class ECCentral:
         }
         self.taxis_autenticados[datos_taxi['id']] = taxi_autenticado
         self.taxis_disponibles[datos_taxi['id']] = taxi_autenticado
-         # Si el taxi ya estaba asignado a un cliente, restaurar la asociación
+        # Si el taxi ya estaba asignado a un cliente, restaurar la asociación
         if datos_taxi['id'] in self.taxi_cliente:
             print(f"[CENTRAL] Taxi {datos_taxi['id']} reconectado y restaurando servicio al cliente.")
         return True

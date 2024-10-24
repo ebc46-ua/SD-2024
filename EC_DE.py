@@ -63,6 +63,7 @@ class EC_DE:
 
 
 
+
     def escuchar_instrucciones(self):
         try:
             while True:
@@ -212,27 +213,31 @@ class EC_DE:
             self.enviar_estado('END')
         else:
             print("[EC_DE] No hay conexión con EC_Central. Taxi detenido.")
-        # Esperar nuevas instrucciones solo si está conectado
-        if self.conectado_central:
-            print("[EC_DE] Esperando nuevas instrucciones de EC_Central.")
-        else:
-            print("[EC_DE] No se puede continuar sin conexión a EC_Central.")
+
 
 
     def reconectar_central(self):
-        while not self.conectado_central:
+        while True:
             try:
-                self.socket_central = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.socket_central.connect((self.central_ip, self.central_puerto))
+                # Intenta reconectar
+                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket.connect((self.central_ip, self.central_puerto))
                 print("[EC_DE] Reconectado a EC_Central.")
-                self.conectado_central = True
-                self.autenticar()
-                # Reanudar escuchando instrucciones
-                threading.Thread(target=self.escuchar_instrucciones, daemon=True).start()
+                break  # Salir del bucle si la reconexión fue exitosa
             except Exception as e:
-                print(f"[EC_DE] No se pudo reconectar a EC_Central: {e}")
-                time.sleep(5)
+                print(f"[EC_DE] No se pudo reconectar a EC_Central: {e}. Intentando de nuevo en 5 segundos...")
+                time.sleep(5)  # Espera antes de intentar reconectar
 
+    def enviar_posicion(self):
+        while True:
+            # Lógica para enviar posición
+            try:
+                posicion = f"<STX>POS#{self.x}#{self.y}<ETX><LRC>{self.calcular_lrc(posicion)}</LRC>"
+                self.socket.send(posicion.encode())
+            except (ConnectionResetError, BrokenPipeError) as e:
+                print(f"[EC_DE] Error al enviar posición a EC_Central: {e}.")
+                self.socket.close()
+                self.reconectar()  # Intenta reconectar
    
 
 

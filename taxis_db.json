@@ -1,6 +1,6 @@
 [
     {
-        "id": 1,
+        "id": "1",
         "estado": "FREE",
         "posicion": [
             1,
@@ -8,7 +8,7 @@
         ]
     },
     {
-        "id": 2,
+        "id": "2",
         "estado": "FREE",
         "posicion": [
             1,
@@ -16,7 +16,7 @@
         ]
     },
     {
-        "id": 3,
+        "id": "3",
         "estado": "FREE",
         "posicion": [
             1,
@@ -24,7 +24,7 @@
         ]
     },
     {
-        "id": 4,
+        "id": "4",
         "estado": "FREE",
         "posicion": [
             1,
@@ -32,7 +32,7 @@
         ]
     },
     {
-        "id": 5,
+        "id": "5",
         "estado": "FREE",
         "posicion": [
             1,
@@ -40,7 +40,7 @@
         ]
     },
     {
-        "id": 6,
+        "id": "6",
         "estado": "FREE",
         "posicion": [
             1,
