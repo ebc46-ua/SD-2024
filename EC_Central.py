@@ -22,9 +22,14 @@ class ECCentral:
         self.taxi_cliente = {}  # Diccionario para asociar taxi_id con cliente_id
         self.taxis_autenticados = {}
         self.sockets_taxis = {}  # Almacenar los sockets de los taxis
-        self.iniciar_servidor_sockets()
+        self.lock = threading.Lock()  # Lock para proteger acceso a datos compartidos
+        self.quit = False  # Flag para indicar salida del programa
+        self.actualizar_mapa = False  # Flag para indicar actualización del mapa
+        
         self.cargar_localizaciones()  # Carga las localizaciones desde el archivo JSON
+        self.cargar_taxis_desde_bd()
         self.inicializar_kafka()
+        self.iniciar_servidor_sockets()
         
         pygame.init()
         self.ancho_ventana = 400  # Ancho de la ventana
@@ -33,6 +38,7 @@ class ECCentral:
         self.ventana = pygame.display.set_mode((self.ancho_ventana, self.alto_ventana))
         pygame.display.set_caption("Mapa de Taxis")
         self.font = pygame.font.SysFont(None, 14)
+        self.actualizar_mapa = True
  
     def iniciar_servidor_sockets(self):
         self.servidor_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -52,6 +58,7 @@ class ECCentral:
             # Paso 1: Recibir ENQ
             mensaje = cliente_socket.recv(1024).decode()
             if mensaje == 'ENQ':
+                # Enviar ACK
                 cliente_socket.send('ACK'.encode())
             else:
                 cliente_socket.send('NACK'.encode())
@@ -60,21 +67,26 @@ class ECCentral:
 
             # Paso 2: Recibir solicitud de autenticación
             mensaje = cliente_socket.recv(1024).decode()
+            # Extraer <STX>, <DATA>, <ETX>, <LRC>
             stx_index = mensaje.find('<STX>')
             etx_index = mensaje.find('<ETX>')
             lrc_index = mensaje.find('<LRC>')
 
             if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                data = mensaje[stx_index + 5:etx_index]
-                lrc = mensaje[lrc_index + 5:]
+                data = mensaje[stx_index+5:etx_index]
+                lrc = mensaje[lrc_index+5:]
+                # Verificar LRC
                 if self.verificar_lrc(data, lrc):
+                    # Procesar datos de autenticación
                     campos = data.split('#')
                     if campos[0] == 'AUTH':
                         taxi_id = campos[1]
                         datos_taxi = {'id': taxi_id}
                         if self.autentifica(datos_taxi):
                             cliente_socket.send('ACK'.encode())
+                            # Almacenar el socket del taxi
                             self.sockets_taxis[taxi_id] = cliente_socket
+                            # Mantener comunicación con el taxi
                             threading.Thread(target=self.gestionar_taxi, args=(cliente_socket, taxi_id), daemon=True).start()
                         else:
                             cliente_socket.send('NACK'.encode())
@@ -89,12 +101,10 @@ class ECCentral:
             print(f"[CENTRAL] Error al procesar conexión de taxi: {e}")
             cliente_socket.close()
 
-
-
     def verificar_lrc(self, data, lrc):
         # Implementar la verificación del LRC
         calculated_lrc = self.calcular_lrc(data)
-        return calculated_lrc == lrc    
+        return calculated_lrc == lrc
 
     def calcular_lrc(self, data):
         # Calcular LRC como XOR de los bytes
@@ -121,70 +131,75 @@ class ECCentral:
             except Exception as e:
                 print(f"[CENTRAL] Error al enviar mapa actualizado: {e}")
 
+    
     def gestionar_taxi(self, cliente_socket, taxi_id):
+        # Mantener comunicación con el taxi
         try:
             while True:
-                try:
-                    mensaje = cliente_socket.recv(1024).decode()
-                    if not mensaje:
-                        print(f"[CENTRAL] Taxi {taxi_id} cerró la conexión (mensaje vacío).")
-                        break
-
-                    print(f"[CENTRAL] Gestionando taxi {taxi_id}. Mensaje recibido: '{mensaje}'")
-                    
+                mensaje = cliente_socket.recv(1024).decode()
+                print('Gestinando taxi \n')
+                if mensaje:
                     # Procesar mensajes del taxi
+                    # Por ejemplo, actualizaciones de posición
+                    print(f"[CENTRAL] Mensaje recibido de taxi {taxi_id}: {mensaje}")
+                    # Extraer <STX>, <DATA>, <ETX>, <LRC>
                     stx_index = mensaje.find('<STX>')
                     etx_index = mensaje.find('<ETX>')
                     lrc_index = mensaje.find('<LRC>')
 
                     if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                        data = mensaje[stx_index + 5:etx_index]
-                        lrc = mensaje[lrc_index + 5:]
-
+                        data = mensaje[stx_index+5:etx_index]
+                        lrc = mensaje[lrc_index+5:]
                         # Verificar LRC
                         if self.verificar_lrc(data, lrc):
                             campos = data.split('#')
                             if campos[0] == 'POS':
                                 # Actualizar posición del taxi
                                 x, y = int(campos[1]), int(campos[2])
-                                self.taxis_autenticados[taxi_id]['posicion'] = (x, y)
-                                self.dibujar_mapa()
+                                with self.lock:
+                                    self.taxis_autenticados[taxi_id]['posicion'] = (x, y)
+                                    self.actualizar_mapa = True
+                                # Enviar ACK
                                 cliente_socket.send('ACK'.encode())
+                                # Enviar mapa actualizado a todos los taxis
                                 self.enviar_mapa_actualizado()
                             elif campos[0] == 'STATUS':
                                 estado = campos[1]
                                 print(f"[CENTRAL] Taxi {taxi_id} está en estado '{estado}'")
-                                self.taxis_autenticados[taxi_id]['estado'] = estado
-                                self.dibujar_mapa()
+                                with self.lock:
+                                    self.taxis_autenticados[taxi_id]['estado'] = estado
+                                    self.actualizar_mapa = True
+                                # Enviar ACK
                                 cliente_socket.send('ACK'.encode())
+                                
+                                # Enviar mapa actualizado a todos los taxis
                                 self.enviar_mapa_actualizado()
-
+                                # Si el estado es 'END', 
                                 if estado == 'END':
-                                    print(f"[CENTRAL] Cerrando conexión con el taxi {taxi_id}.")
-                                    break  # Cerrar conexión
+                                    print(f"[CENTRAL] Taxi {taxi_id} ha finalizado el servicio.")
+                                    with self.lock:
+                                        self.taxis_autenticados[taxi_id]['estado'] = 'FREE'
+                                        self.actualizar_mapa = True
+                                    # notificar al cliente
+                                    with self.lock:
+                                        cliente_id = self.taxi_cliente.get(taxi_id)
+                                        if cliente_id:
+                                            self.enviar_mensaje_cliente(cliente_id, 'COMPLETED')
+                                            del self.taxi_cliente[taxi_id]
                             else:
                                 cliente_socket.send('NACK'.encode())
                         else:
                             cliente_socket.send('NACK'.encode())
                     else:
                         cliente_socket.send('NACK'.encode())
-                except (ConnectionResetError, BrokenPipeError) as e:
-                    print(f"[CENTRAL] Error en la conexión con taxi {taxi_id}: {e}")
+                else:
                     break
         except Exception as e:
-            print(f"[CENTRAL] Error en la gestión del taxi {taxi_id}: {e}")
-        finally:
-            # Cierre de conexiones
+            print(f"[CENTRAL] Conexión con taxi {taxi_id} cerrada: {e}")
             cliente_socket.close()
-            del self.sockets_taxis[taxi_id]
-            del self.taxis_autenticados[taxi_id]
-            if taxi_id in self.taxis_disponibles:
-                del self.taxis_disponibles[taxi_id]
-            self.dibujar_mapa()
-            self.enviar_mapa_actualizado()
-
-
-
+            # Iniciar temporizador de 10 segundos antes de marcar incidencia
+            threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
+            
     
     def esperar_reconexion_taxi(self, taxi_id):
         print(f"[CENTRAL] Esperando 10 segundos por reconexión del taxi {taxi_id}...")
@@ -196,27 +211,44 @@ class ECCentral:
             time.sleep(1)
         # Si no se reconecta, marcar incidencia
         print(f"[CENTRAL] Taxi {taxi_id} no se ha reconectado en 10 segundos. Marcando incidencia.")
-        if taxi_id in self.taxis_autenticados:
-            del self.taxis_autenticados[taxi_id]
-        if taxi_id in self.sockets_taxis:
-            del self.sockets_taxis[taxi_id]
-        if taxi_id in self.taxis_disponibles:
-            del self.taxis_disponibles[taxi_id]
-        self.dibujar_mapa()
+        with self.lock:
+            if taxi_id in self.taxis_autenticados:
+                del self.taxis_autenticados[taxi_id]
+            if taxi_id in self.sockets_taxis:
+                del self.sockets_taxis[taxi_id]
+            if taxi_id in self.taxis_disponibles:
+                del self.taxis_disponibles[taxi_id]
+            self.actualizar_mapa = True
         self.enviar_mapa_actualizado()
         # Notificar al cliente si el taxi estaba asignado
-        cliente_id = self.taxi_cliente.get(taxi_id)
-        if cliente_id:
-            self.enviar_mensaje_cliente(cliente_id, 'TAXI_DISCONNECTED')
-            del self.taxi_cliente[taxi_id]
+        with self.lock:
+            cliente_id = self.taxi_cliente.get(taxi_id)
+            if cliente_id:
+                self.enviar_mensaje_cliente(cliente_id, 'TAXI_DISCONNECTED')
+                del self.taxi_cliente[taxi_id]
             
-            
-    def dibujar_mapa(self):
-        for evento in pygame.event.get():
-            if evento.type == pygame.QUIT:
-                pygame.quit()
-                exit()
+    def run(self):
+        # Iniciar hilos para manejar conexiones y Kafka
+        threading.Thread(target=self.procesar_comandos_arbitrarios, daemon=True).start()
+        threading.Thread(target=self.procesar_peticiones_kafka, daemon=True).start()
 
+        clock = pygame.time.Clock()
+        while not self.quit:
+            for evento in pygame.event.get():
+                if evento.type == pygame.QUIT:
+                    self.quit = True
+                    pygame.quit()
+                    break
+
+            if self.actualizar_mapa:
+                self.dibujar_mapa()
+                pygame.display.flip()
+                self.actualizar_mapa = False
+
+            clock.tick(60)  # Limitar a 60 FPS
+    
+     
+    def dibujar_mapa(self):
         self.ventana.fill((255, 255, 255))  # Limpiar la pantalla con color blanco
 
         # Dibujar la cuadrícula
@@ -231,33 +263,32 @@ class ECCentral:
             rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
             pygame.draw.rect(self.ventana, (0, 0, 255), rect)  # Color azul para las localizaciones
             # Opcional: dibujar el ID de la localización
-            font = pygame.font.SysFont(None, 14)
-            img = font.render(id_localizacion, True, (255, 255, 255))
+            img = self.font.render(id_localizacion, True, (255, 255, 255))
             self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
 
         # Dibujar los taxis
-        for taxi_id, taxi_info in self.taxis_autenticados.items():
-            x, y = taxi_info['posicion']
-            rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-            if taxi_info['estado'] == 'RUN':
-                color_taxi = (0, 255, 0)  # Verde para estado RUN
-            elif taxi_info['estado'] == 'STOPPED':
-                color_taxi = (255, 255, 0)  # Amarillo para estado STOPPED
-            elif taxi_info['estado'] == 'END':
-                color_taxi = (255, 0, 255)  # Magenta para estado BUSY
-            else:
-                color_taxi = (255, 0, 0)  # Morado para estado desconocido
-            pygame.draw.rect(self.ventana, color_taxi, rect)
+        with self.lock:
+            for taxi_id, taxi_info in self.taxis_autenticados.items():
+                x, y = taxi_info['posicion']
+                rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
+                if taxi_info['estado'] == 'RUN':
+                    color_taxi = (0, 255, 0)  # Verde para estado RUN
+                elif taxi_info['estado'] == 'STOPPED':
+                    color_taxi = (255, 255, 0)  # Amarillo para estado STOPPED
+                elif taxi_info['estado'] == 'END':
+                    color_taxi = (255, 0, 0)  # rojo para estado END
+                else:
+                    color_taxi = (255, 0, 255)  # Morado para estado desconocido
+                pygame.draw.rect(self.ventana, color_taxi, rect)
+                
+                img = self.font.render(str(taxi_id), True, (255, 255, 255))
+                self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+
+
+    # def actualizar_pygame(self):
+    #     while True:
             
-            img = font.render(str(taxi_id), True, (255, 255, 255))
-            self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
-
-        pygame.display.flip()  # Actualizar la pantalla
-
-    def actualizar_pygame(self):
-        while True:
-            self.dibujar_mapa()
-            #time.sleep(0.1)  # Pequeña pausa para no saturar la CPU
+    #         #time.sleep(0.1)  # Pequeña pausa para no saturar la CPU
             
             
     def cargar_localizaciones(self):
@@ -297,14 +328,15 @@ class ECCentral:
 
                     # Verificar ID duplicado
                     if taxi_id in self.taxis_disponibles:
-                        print(f"Taxi con id {taxi_id} ya cargado. Taxi omitido.")
+                        print(f"Taxi con id {taxi_id} ya cargado. Esperando su autenticación.")
                         continue
 
                     self.taxis_disponibles[taxi_id] = {
                         'estado': estado,
                         'posicion': posicion
                     }
-                print("Taxis cargados correctamente.")
+                print(f"Taxi {taxi_id} cargado con posición {posicion} y estado {estado}.")    
+            print("Taxis cargados correctamente.")
         except Exception as e:
             print(f"Error cargando los taxis: {e}")
 
@@ -314,9 +346,9 @@ class ECCentral:
         # Inicializa los productores y consumidores de Kafka para la comunicación con los taxis y clientes
         self.producer = KafkaProducer(bootstrap_servers=[self.broker_ip])
         self.consumer = KafkaConsumer('solicitudes', bootstrap_servers=[self.broker_ip], group_id='central')
-        self.consumer_taxi = KafkaConsumer('auth_taxi', bootstrap_servers=[self.broker_ip], group_id='central')
-        self.consumer_comando = KafkaConsumer('comando_taxi', bootstrap_servers=[self.broker_ip], group_id='central')
         self.producer_respuestas = KafkaProducer(bootstrap_servers=[self.broker_ip])
+        
+        self.producer_mapa = KafkaProducer(bootstrap_servers=[self.broker_ip])
 
             
     
@@ -362,14 +394,14 @@ class ECCentral:
         except Exception as e:
             print(f"Error cargando los taxis: {e}")
             taxis_data = []
-
+        
         # Verificar si el taxi ya está registrado
         taxi_encontrado = None
         for taxi in taxis_data:
             if taxi['id'] == datos_taxi['id']:
                 taxi_encontrado = taxi
                 break
-
+        
         # Validar si el taxi ya está autenticado y conectado
         if datos_taxi['id'] in self.taxis_autenticados:
             print(f"Taxi con id {datos_taxi['id']} ya está autenticado y conectado.")
@@ -401,29 +433,29 @@ class ECCentral:
         }
         self.taxis_autenticados[datos_taxi['id']] = taxi_autenticado
         self.taxis_disponibles[datos_taxi['id']] = taxi_autenticado
-        # Si el taxi ya estaba asignado a un cliente, restaurar la asociación
+         # Si el taxi ya estaba asignado a un cliente, restaurar la asociación
         if datos_taxi['id'] in self.taxi_cliente:
             print(f"[CENTRAL] Taxi {datos_taxi['id']} reconectado y restaurando servicio al cliente.")
         return True
 
 
 
-    def procesar_autenticacion_taxi(self, autenticacion):
-        # Procesa la autenticación de taxis
-        if self.autentifica(autenticacion):
-            print(f"Taxi {autenticacion['id']} autenticado con éxito.")
-            self.enviar_mensaje_autenticacion(autenticacion['id'], 'OK')
-        else:
-            print(f"Taxi {autenticacion['id']} falló en la autenticación.")
-            self.enviar_mensaje_autenticacion(autenticacion['id'], 'KO')
+    # def procesar_autenticacion_taxi(self, autenticacion):
+    #     # Procesa la autenticación de taxis
+    #     if self.autentifica(autenticacion):
+    #         print(f"Taxi {autenticacion['id']} autenticado con éxito.")
+    #         self.enviar_mensaje_autenticacion(autenticacion['id'], 'OK')
+    #     else:
+    #         print(f"Taxi {autenticacion['id']} falló en la autenticación.")
+    #         self.enviar_mensaje_autenticacion(autenticacion['id'], 'KO')
 
-    def enviar_mensaje_autenticacion(self, taxi_id, estado):
-        # Envía el estado de autenticación al taxi
-        mensaje = {
-            'taxi_id': taxi_id,
-            'estado': estado
-        }
-        self.producer.send('respuesta_auth_taxi', json.dumps(mensaje).encode())
+    # def enviar_mensaje_autenticacion(self, taxi_id, estado):
+    #     # Envía el estado de autenticación al taxi
+    #     mensaje = {
+    #         'taxi_id': taxi_id,
+    #         'estado': estado
+    #     }
+    #     self.producer.send('respuesta_auth_taxi', json.dumps(mensaje).encode())
 
     def procesar_peticion_cliente(self, peticion):
         # Procesa cada petición de servicio de taxi de los clientes
@@ -503,33 +535,12 @@ class ECCentral:
         for taxi_id, taxi_info in self.taxis_autenticados.items():
             if taxi_info.get('estado', 'FREE') == 'FREE':
                 taxi_info['estado'] = 'BUSY'
+                self.actualizar_mapa = True
                 print(f"Taxi {taxi_id} asignado al cliente {cliente_id} para el destino {destino_coord}")
                 return taxi_id
         print("No hay taxis disponibles.")
         return None
 
-    
-    # def enviar_taxi(self, taxi_id, cliente_id, destino):
-    #     # Simula el movimiento progresivo del taxi hasta el destino
-    #     taxi_info = self.taxis_autenticados.get(taxi_id)
-    #     if taxi_info:
-    #         pos_actual = taxi_info['posicion']
-    #         destino_coord = destino  # Ya es una tupla de coordenadas
-            
-    #         print(f"Taxi {taxi_id} comenzando movimiento hacia {destino_coord}.")
-    #         taxi_info['estado'] = 'RUN'
-             
-    #         # Movimiento paso a paso hacia el destino
-    #         while pos_actual != destino_coord:
-    #             pos_actual = self.calcular_siguiente_paso(pos_actual, destino_coord)
-    #             taxi_info['posicion'] = pos_actual
-    #             print(f"Taxi {taxi_id} moviéndose a {pos_actual}")
-    #             self.dibujar_mapa()
-    #             time.sleep(0.5)  # Simular movimiento en tiempo real
-                
-    #         print(f"Taxi {taxi_id} ha llegado a su destino.")
-    #         taxi_info['estado'] = 'FREE'  # Liberar el taxi para que pueda ser asignado a otro cliente
-    #         self.dibujar_mapa()
     
     def enviar_taxi(self, taxi_id, cliente_id, destino):
         # Enviar instrucciones al taxi
@@ -537,6 +548,7 @@ class ECCentral:
         if taxi_info:
             print(f"Taxi {taxi_id} comenzando movimiento hacia {destino}.")
             taxi_info['estado'] = 'RUN'
+            self.actualizar_mapa = True
             self.enviar_instrucciones_taxi(taxi_id, destino)
         else:
             print(f"[CENTRAL] No se pudo enviar taxi {taxi_id} al cliente {cliente_id}.")
@@ -558,71 +570,71 @@ class ECCentral:
 
         return x_actual, y_actual
 
-    def procesar_mensajes_sensores(self):
-        # Procesar mensajes recibidos de los sensores de los taxis
-        for mensaje in self.consumer_sensores:
-            datos_sensor = json.loads(mensaje.value.decode())
-            taxi_id = datos_sensor.get('taxi_id')
-            estado = datos_sensor.get('estado')
+    # def procesar_mensajes_sensores(self):
+    #     # Procesar mensajes recibidos de los sensores de los taxis
+    #     for mensaje in self.consumer_sensores:
+    #         datos_sensor = json.loads(mensaje.value.decode())
+    #         taxi_id = datos_sensor.get('taxi_id')
+    #         estado = datos_sensor.get('estado')
             
-            if taxi_id in self.taxis_autenticados:
-                if estado == 'KO':
-                    print(f"Taxi {taxi_id} ha detectado una incidencia y se detiene.")
-                    self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
-                    self.enviar_mensaje_taxi(taxi_id, 'STOP')
-                elif estado == 'OK':
-                    # Si el estado vuelve a OK, reanudar el servicio del taxi
-                    print(f"Taxi {taxi_id} ha resuelto la incidencia y continúa su viaje.")
-                    self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
-                    self.enviar_mensaje_taxi(taxi_id, 'RESUME')
+    #         if taxi_id in self.taxis_autenticados:
+    #             if estado == 'KO':
+    #                 print(f"Taxi {taxi_id} ha detectado una incidencia y se detiene.")
+    #                 self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
+    #                 self.enviar_mensaje_taxi(taxi_id, 'STOP')
+    #             elif estado == 'OK':
+    #                 # Si el estado vuelve a OK, reanudar el servicio del taxi
+    #                 print(f"Taxi {taxi_id} ha resuelto la incidencia y continúa su viaje.")
+    #                 self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
+    #                 self.enviar_mensaje_taxi(taxi_id, 'RESUME')
     
-    def procesar_comandos(self):
-        # Procesa comandos arbitrarios enviados a los taxis desde EC_Central
-        for mensaje in self.consumer_comando:
-            datos_comando = json.loads(mensaje.value.decode())
-            taxi_id = datos_comando.get('taxi_id')
-            comando = datos_comando.get('comando')
+    # def procesar_comandos(self):
+    #     # Procesa comandos arbitrarios enviados a los taxis desde EC_Central
+    #     for mensaje in self.consumer_comando:
+    #         datos_comando = json.loads(mensaje.value.decode())
+    #         taxi_id = datos_comando.get('taxi_id')
+    #         comando = datos_comando.get('comando')
             
-            if taxi_id in self.taxis_autenticados:
-                print(f"Procesando comando '{comando}' para el taxi {taxi_id}")
-                self.enviar_mensaje_taxi(taxi_id, comando)
-                # Ejecutar acción local según el comando
-                if comando == 'PARAR':
-                    self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
-                elif comando == 'REANUDAR':
-                    self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
-                elif comando == 'VOLVER_BASE':
-                    self.taxis_autenticados[taxi_id]['estado'] = 'returning'
-                    self.enviar_taxi_a_base(taxi_id)
+    #         if taxi_id in self.taxis_autenticados:
+    #             print(f"Procesando comando '{comando}' para el taxi {taxi_id}")
+    #             self.enviar_mensaje_taxi(taxi_id, comando)
+    #             # Ejecutar acción local según el comando
+    #             if comando == 'PARAR':
+    #                 self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
+    #             elif comando == 'REANUDAR':
+    #                 self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
+    #             elif comando == 'VOLVER_BASE':
+    #                 self.taxis_autenticados[taxi_id]['estado'] = 'returning'
+    #                 self.enviar_taxi_a_base(taxi_id)
     
-    def enviar_taxi_a_base(self, taxi_id):
-        # Envía un comando para que el taxi regrese a la base
-        mensaje = {
-            'taxi_id': taxi_id,
-            'destino': '1,1'  # La posición de la base es [1,1]
-        }
-        self.producer.send('ordenes_taxi', json.dumps(mensaje).encode())
-        print(f"Enviado taxi {taxi_id} a la base.")
+    # def enviar_taxi_a_base(self, taxi_id):
+    #     # Envía un comando para que el taxi regrese a la base
+    #     mensaje = {
+    #         'taxi_id': taxi_id,
+    #         'destino': '1,1'  # La posición de la base es [1,1]
+    #     }
+    #     self.producer.send('ordenes_taxi', json.dumps(mensaje).encode())
+    #     print(f"Enviado taxi {taxi_id} a la base.")
         
         
-    def enviar_mensaje_taxi(self, taxi_id, comando):
-        # Envía un comando específico a un taxi
-        mensaje = {
-            'taxi_id': taxi_id,
-            'comando': comando
-        }
-        self.producer.send('comando_taxi', json.dumps(mensaje).encode())
-        print(f"Enviado comando '{comando}' al taxi {taxi_id}")
+    # def enviar_mensaje_taxi(self, taxi_id, comando):
+    #     # Envía un comando específico a un taxi
+    #     mensaje = {
+    #         'taxi_id': taxi_id,
+    #         'comando': comando
+    #     }
+    #     self.producer.send('comando_taxi', json.dumps(mensaje).encode())
+    #     print(f"Enviado comando '{comando}' al taxi {taxi_id}")
     
-    def actualizar_mapa_taxi(self, taxi_id, destino):
-        # Actualiza la posición del taxi en el mapa y envía el estado del mapa
-        taxi_info = self.taxis_autenticados.get(taxi_id)
-        if taxi_info:
-            pos_actual = taxi_info['posicion']
-            destino_coord = destino.split(',')
-            taxi_info['posicion'] = destino_coord  # Solo como ejemplo, debería calcularse el movimiento
-            print(f"Taxi {taxi_id} moviéndose de {pos_actual} a {destino_coord}")
-            self.enviar_mapa_actualizado()
+    # def actualizar_mapa_taxi(self, taxi_id, destino):
+    #     # Actualiza la posición del taxi en el mapa y envía el estado del mapa
+    #     taxi_info = self.taxis_autenticados.get(taxi_id)
+    #     if taxi_info:
+    #         pos_actual = taxi_info['posicion']
+    #         destino_coord = destino.split(',')
+    #         taxi_info['posicion'] = destino_coord  # Solo como ejemplo, debería calcularse el movimiento
+    #         print(f"Taxi {taxi_id} moviéndose de {pos_actual} a {destino_coord}")
+    #         self.enviar_mapa_actualizado()
             
     def enviar_comando_taxi(self, taxi_id, comando):
         cliente_socket = self.sockets_taxis.get(taxi_id)
@@ -637,19 +649,25 @@ class ECCentral:
 
         
     def enviar_mapa_actualizado(self):
-        # Envía el estado completo del mapa a todos los taxis y clientes conectados
-        mensaje_mapa = {
-            'mapa': self.mapa
-        }
-        self.producer.send('mapa_estado', json.dumps(mensaje_mapa).encode())
-        print("Mapa actualizado enviado a los taxis y clientes.")
+        # Envía el mapa actualizado a los clientes a través de Kafka
+        with self.lock:
+            taxis_estado = {}
+            for taxi_id, taxi_info in self.taxis_autenticados.items():
+                taxis_estado[taxi_id] = {
+                    'posicion': taxi_info['posicion'],
+                    'estado': taxi_info['estado']
+                }
+            mensaje_mapa = {
+                'mapa': taxis_estado
+            }
+        self.producer_mapa.send('mapa_estado', json.dumps(mensaje_mapa).encode())
+        print("[CENTRAL] Mapa actualizado enviado a los clientes.")
         
     def escuchar_peticiones(self):
         # Escucha peticiones tanto de clientes como de taxis (autenticación)
-        print("[CENTRAL] Esperando solicitudes de clientes...")
+        print("[CENTRAL] Esperando peticiones...")
         
         while True:
-            self.dibujar_mapa()  # Actualizar la representación gráfica
              
             for mensaje in self.consumer:
                 peticion = json.loads(mensaje.value.decode())
@@ -660,7 +678,15 @@ class ECCentral:
                 self.procesar_autenticacion_taxi(autenticacion)
                 
 
-
+    def procesar_peticiones_kafka(self):
+        while not self.quit:
+            # Procesar mensajes de solicitudes de clientes
+            raw_msgs = self.consumer.poll(timeout_ms=1000)
+            for tp, messages in raw_msgs.items():
+                for message in messages:
+                    peticion = json.loads(message.value.decode())
+                    self.procesar_peticion_cliente(peticion)
+                    
     def procesar_solicitudes(self):
         cliente_id = 1  # Podemos asignar IDs incrementales para los clientes
         for destino_id in self.solicitudes:
@@ -700,12 +726,11 @@ class ECCentral:
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description="Ejecutar EC_Central con parámetros de conexión y autenticación.")
 
-    parser.add_argument('puerto_escucha', type=int, default=2181, help='Puerto de escucha de EC_Central')
-    parser.add_argument('broker_ip', type=str, default='localhost:9092', help='Ip del Broker')
-    parser.add_argument('db_path', type=str, default='taxis_db.json', help='BD de los taxis')
+    parser.add_argument('puerto_escucha', type=int, help='Puerto de escucha de EC_Central')
+    parser.add_argument('broker_ip', type=str, help='IP del Broker')
+    parser.add_argument('db_path', type=str, help='BD de los taxis')
 
     args = parser.parse_args()
 
@@ -728,15 +753,5 @@ if __name__ == "__main__":
     ec_central.cargar_taxis_desde_bd()
     ec_central.imprimir_taxis()
 
-    
-    # Iniciar el hilo de actualización de pygame
-    threading.Thread(target=ec_central.actualizar_pygame, daemon=True).start()
-    threading.Thread(target=ec_central.procesar_comandos_arbitrarios, daemon=True).start()
-    
-    # Comenzar a escuchar peticiones de Kafka
-    try:
-        print("EC_Central está iniciando y escuchando peticiones...")
-        ec_central.escuchar_peticiones()  # Este método nunca finaliza, ya que escucha constantemente
-    except KeyboardInterrupt:
-        print("EC_Central detenido manualmente.")
-        pygame.quit()
+    # Ejecutar el bucle principal
+    ec_central.run()
