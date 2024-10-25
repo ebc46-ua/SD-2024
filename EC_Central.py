@@ -57,19 +57,15 @@ class ECCentral:
 
     def procesar_conexion_taxi(self, cliente_socket):
         try:
-            # Paso 1: Recibir ENQ
             mensaje = cliente_socket.recv(1024).decode()
             if mensaje == 'ENQ':
-                # Enviar ACK
                 cliente_socket.send('ACK'.encode())
             else:
                 cliente_socket.send('NACK'.encode())
                 cliente_socket.close()
                 return
 
-            # Paso 2: Recibir solicitud de autenticación
             mensaje = cliente_socket.recv(1024).decode()
-            # Extraer <STX>, <DATA>, <ETX>, <LRC>
             stx_index = mensaje.find('<STX>')
             etx_index = mensaje.find('<ETX>')
             lrc_index = mensaje.find('<LRC>')
@@ -77,19 +73,18 @@ class ECCentral:
             if stx_index != -1 and etx_index != -1 and lrc_index != -1:
                 data = mensaje[stx_index+5:etx_index]
                 lrc = mensaje[lrc_index+5:]
-                # Verificar LRC
                 if self.verificar_lrc(data, lrc):
-                    # Procesar datos de autenticación
                     campos = data.split('#')
                     if campos[0] == 'AUTH':
                         taxi_id = campos[1]
                         datos_taxi = {'id': taxi_id}
                         if self.autentifica(datos_taxi):
                             cliente_socket.send('ACK'.encode())
-                            # Almacenar el socket del taxi
                             self.sockets_taxis[taxi_id] = cliente_socket
-                            # Mantener comunicación con el taxi
                             threading.Thread(target=self.gestionar_taxi, args=(cliente_socket, taxi_id), daemon=True).start()
+                            
+                            # Enviar el mapa actualizado después de iniciar el hilo de gestión
+                            self.enviar_mapa_actualizado()
                         else:
                             cliente_socket.send('NACK'.encode())
                     else:
@@ -102,6 +97,7 @@ class ECCentral:
         except Exception as e:
             print(f"[CENTRAL] Error al procesar conexión de taxi: {e}")
             cliente_socket.close()
+
 
     def verificar_lrc(self, data, lrc):
         # Implementar la verificación del LRC
@@ -191,6 +187,18 @@ class ECCentral:
                                     # Por ejemplo, si hay un nuevo destino:
                                     nuevo_destino = (8, 16)  # Ejemplo de nuevas coordenadas
                                     self.enviar_instrucciones_taxi(taxi_id, nuevo_destino)
+                            elif campos[0] == 'ARRIVED':  # Indica que el taxi ha llegado
+                                cliente_id = self.taxi_cliente.get(taxi_id)
+                                if cliente_id:
+                                    with self.lock:
+                                        # Cambiar estado a 'RECOGIDO' y eliminar del diccionario
+                                        self.localizaciones_clientes[cliente_id]['estado'] = 'RECOGIDO'
+                                        del self.localizaciones_clientes[cliente_id]  # Elimina al cliente del mapa
+                                        self.actualizar_mapa = True
+
+                                    # Actualizar el mapa visualmente y notificar a los taxis
+                                    self.dibujar_mapa()
+                                    self.enviar_mapa_actualizado()
 
                             else:
                                 cliente_socket.send('NACK'.encode())
@@ -278,7 +286,7 @@ class ECCentral:
             for taxi_id, taxi_info in self.taxis_autenticados.items():
                 x, y = taxi_info['posicion']
                 rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-                color_taxi = (0, 255, 0) if taxi_info['estado'] == 'RUN' else (255, 255, 0)
+                color_taxi = (0, 255, 0) if taxi_info['estado'] == 'RUN' else (255, 0, 0)
                 pygame.draw.rect(self.ventana, color_taxi, rect)
                 img = self.font.render(str(taxi_id), True, (255, 255, 255))
                 self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
@@ -408,21 +416,18 @@ class ECCentral:
     def autentifica(self, datos_taxi):
         # Autenticar taxi usando su ID
         try:
-            # Cargar taxis existentes desde el archivo JSON
             with open(self.db_path, 'r') as archivo_taxis:
                 taxis_data = json.load(archivo_taxis)
         except Exception as e:
             print(f"Error cargando los taxis: {e}")
             taxis_data = []
-        
-        # Verificar si el taxi ya está registrado
+
         taxi_encontrado = None
         for taxi in taxis_data:
             if taxi['id'] == datos_taxi['id']:
                 taxi_encontrado = taxi
                 break
-        
-        # Validar si el taxi ya está autenticado y conectado
+
         if datos_taxi['id'] in self.taxis_autenticados:
             print(f"Taxi con id {datos_taxi['id']} ya está autenticado y conectado.")
             return False
@@ -433,19 +438,16 @@ class ECCentral:
             print(f"El taxi con id {datos_taxi['id']} no está registrado en la base de datos.")
             return False
 
-        # Validar el estado del taxi
         estado_valido = taxi_encontrado['estado'] in ['FREE', 'BUSY', 'STOPPED', 'END']
         if not estado_valido:
             print(f"Estado '{taxi_encontrado['estado']}' no reconocido para el taxi {datos_taxi['id']}.")
             return False
 
-        # Validar la posición del taxi
         x, y = taxi_encontrado['posicion']
         if not (0 <= x < 20 and 0 <= y < 20):
             print(f"Posición {taxi_encontrado['posicion']} fuera del mapa para el taxi {datos_taxi['id']}.")
             return False
 
-        # Añadir el taxi a taxis_autenticados y taxis_disponibles
         taxi_autenticado = {
             "id": datos_taxi['id'],
             "posicion": taxi_encontrado['posicion'],
@@ -453,10 +455,20 @@ class ECCentral:
         }
         self.taxis_autenticados[datos_taxi['id']] = taxi_autenticado
         self.taxis_disponibles[datos_taxi['id']] = taxi_autenticado
-         # Si el taxi ya estaba asignado a un cliente, restaurar la asociación
+
+        # Llamar a dibujar_mapa() para mostrar el taxi recién autenticado
+        self.dibujar_mapa()
+        # Enviar el mapa actualizado a todos los taxis
+        self.enviar_mapa_actualizado()
+
         if datos_taxi['id'] in self.taxi_cliente:
             print(f"[CENTRAL] Taxi {datos_taxi['id']} reconectado y restaurando servicio al cliente.")
+        
+        # Actualizar el mapa y enviar a todos los taxis y clientes conectados
+        self.enviar_mapa_actualizado()  # << Esta es la línea añadida para actualizar el mapa
+
         return True
+
 
 
 
