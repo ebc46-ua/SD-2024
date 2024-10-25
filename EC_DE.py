@@ -82,8 +82,9 @@ class EC_DE:
                     lrc_index = mensaje.find('<LRC>')
 
                     if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                        data = mensaje[stx_index+5:etx_index]
-                        lrc = mensaje[lrc_index+5:]
+                        data = mensaje[stx_index + 5:etx_index]
+                        lrc = mensaje[lrc_index + 5:]  # Esto debería ser correcto
+                        lrc = lrc.strip()  # Asegúrate de que no haya espacios en blanco
                         # Verificar LRC
                         if self.verificar_lrc(data, lrc):
                             campos = data.split('#', 1)
@@ -177,11 +178,12 @@ class EC_DE:
         lrc = 0
         for byte in data.encode():
             lrc ^= byte
-        return str(lrc)
+        return str(lrc)  
     
     def verificar_lrc(self, data, lrc):
+        # Implementar la verificación del LRC
         calculated_lrc = self.calcular_lrc(data)
-        return calculated_lrc == lrc
+        return str(calculated_lrc) == lrc.strip()  # Compara correctamente
 
     def mover_hacia_destino(self, destino):
         while self.posicion != destino:

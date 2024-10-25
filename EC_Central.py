@@ -106,14 +106,13 @@ class ECCentral:
     def verificar_lrc(self, data, lrc):
         # Implementar la verificación del LRC
         calculated_lrc = self.calcular_lrc(data)
-        return calculated_lrc == lrc
+        return str(calculated_lrc) == lrc.strip()  # Compara correctamente
 
     def calcular_lrc(self, data):
-        # Calcular LRC como XOR de los bytes
         lrc = 0
         for byte in data.encode():
             lrc ^= byte
-        return str(lrc)
+        return str(lrc)  
 
     def enviar_mapa_actualizado(self):
         # Preparar los datos a enviar: posiciones y estados de todos los taxis
@@ -142,7 +141,6 @@ class ECCentral:
                 print('Gestinando taxi \n')
                 if mensaje:
                     # Procesar mensajes del taxi
-                    # Por ejemplo, actualizaciones de posición
                     print(f"[CENTRAL] Mensaje recibido de taxi {taxi_id}: {mensaje}")
                     # Extraer <STX>, <DATA>, <ETX>, <LRC>
                     stx_index = mensaje.find('<STX>')
@@ -150,8 +148,8 @@ class ECCentral:
                     lrc_index = mensaje.find('<LRC>')
 
                     if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                        data = mensaje[stx_index+5:etx_index]
-                        lrc = mensaje[lrc_index+5:]
+                        data = mensaje[stx_index + 5:etx_index]
+                        lrc = mensaje[lrc_index + 5:]
                         # Verificar LRC
                         if self.verificar_lrc(data, lrc):
                             campos = data.split('#')
@@ -173,21 +171,27 @@ class ECCentral:
                                     self.actualizar_mapa = True
                                 # Enviar ACK
                                 cliente_socket.send('ACK'.encode())
-                                
                                 # Enviar mapa actualizado a todos los taxis
                                 self.enviar_mapa_actualizado()
-                                # Si el estado es 'END', 
+
+                                # Si el estado es 'END', enviar nuevas instrucciones
                                 if estado == 'END':
                                     print(f"[CENTRAL] Taxi {taxi_id} ha finalizado el servicio.")
                                     with self.lock:
                                         self.taxis_autenticados[taxi_id]['estado'] = 'FREE'
                                         self.actualizar_mapa = True
-                                    # notificar al cliente
+                                    # Notificar al cliente
                                     with self.lock:
                                         cliente_id = self.taxi_cliente.get(taxi_id)
                                         if cliente_id:
                                             self.enviar_mensaje_cliente(cliente_id, 'COMPLETED')
                                             del self.taxi_cliente[taxi_id]
+
+                                    # Aquí puedes enviar nuevas instrucciones
+                                    # Por ejemplo, si hay un nuevo destino:
+                                    nuevo_destino = (8, 16)  # Ejemplo de nuevas coordenadas
+                                    self.enviar_instrucciones_taxi(taxi_id, nuevo_destino)
+
                             else:
                                 cliente_socket.send('NACK'.encode())
                         else:
@@ -201,6 +205,8 @@ class ECCentral:
             cliente_socket.close()
             # Iniciar temporizador de 10 segundos antes de marcar incidencia
             threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
+
+
             
     
     def esperar_reconexion_taxi(self, taxi_id):
@@ -545,16 +551,16 @@ class ECCentral:
                     print("[CENTRAL] Formato incorrecto. Use: TAXI_ID COMANDO [DESTINO]")
     
     def enviar_instrucciones_taxi(self, taxi_id, destino_coord):
-        # Enviar el destino al taxi a través del socket
         cliente_socket = self.sockets_taxis.get(taxi_id)
         if cliente_socket:
             data = f'GO#{destino_coord[0]}#{destino_coord[1]}'
             lrc = self.calcular_lrc(data)
-            mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
+            mensaje = f'<STX>{data}<ETX><LRC>{lrc}' 
             cliente_socket.send(mensaje.encode())
             print(f"[CENTRAL] Instrucciones enviadas al taxi {taxi_id}")
         else:
             print(f"[CENTRAL] No se pudo enviar instrucciones al taxi {taxi_id}. Socket no encontrado.")
+
 
 
     def enviar_mensaje_cliente(self, cliente_id, estado):
