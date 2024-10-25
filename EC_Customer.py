@@ -25,14 +25,18 @@ class ECCustomer:
         if self.solicitudes_pendientes:
             request = self.solicitudes_pendientes.pop(0)
             destino_id = request['Id']
+            origen_coord = request['Start']
             mensaje = {
                 'cliente_id': self.cliente_id,
+                'origen': origen_coord,  # Añade el origen
                 'destino': destino_id 
             }
             self.producer.send('solicitudes', json.dumps(mensaje).encode())
             print(f"[CLIENTE {self.cliente_id}] Solicitud enviada para destino {destino_id}")
         else:
-            print(f"[CLIENTE {self.cliente_id}] No hay m�s solicitudes pendientes.")
+            print(f"[CLIENTE {self.cliente_id}] No hay más solicitudes pendientes.")
+
+
 
 
     def escuchar_respuestas(self):

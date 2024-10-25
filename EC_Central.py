@@ -30,6 +30,8 @@ class ECCentral:
         self.cargar_taxis_desde_bd()
         self.inicializar_kafka()
         self.iniciar_servidor_sockets()
+        self.localizaciones_clientes = {}  # Diccionario para almacenar el origen de cada cliente
+
         
         pygame.init()
         self.ancho_ventana = 400  # Ancho de la ventana
@@ -262,7 +264,6 @@ class ECCentral:
             x, y = coord
             rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
             pygame.draw.rect(self.ventana, (0, 0, 255), rect)  # Color azul para las localizaciones
-            # Opcional: dibujar el ID de la localización
             img = self.font.render(id_localizacion, True, (255, 255, 255))
             self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
 
@@ -271,18 +272,31 @@ class ECCentral:
             for taxi_id, taxi_info in self.taxis_autenticados.items():
                 x, y = taxi_info['posicion']
                 rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-                if taxi_info['estado'] == 'RUN':
-                    color_taxi = (0, 255, 0)  # Verde para estado RUN
-                elif taxi_info['estado'] == 'STOPPED':
-                    color_taxi = (255, 255, 0)  # Amarillo para estado STOPPED
-                elif taxi_info['estado'] == 'END':
-                    color_taxi = (255, 0, 0)  # rojo para estado END
-                else:
-                    color_taxi = (255, 0, 255)  # Morado para estado desconocido
+                color_taxi = (0, 255, 0) if taxi_info['estado'] == 'RUN' else (255, 255, 0)
                 pygame.draw.rect(self.ventana, color_taxi, rect)
-                
                 img = self.font.render(str(taxi_id), True, (255, 255, 255))
                 self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+
+        # Dibujar los clientes
+        for cliente_id, info_cliente in self.localizaciones_clientes.items():
+            origen = info_cliente.get('origen')
+            if isinstance(origen, tuple) and len(origen) == 2:
+                x, y = origen
+                rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
+                pygame.draw.rect(self.ventana, (255, 255, 0), rect)  
+                img = self.font.render(f"C{cliente_id}", True, (255, 255, 255))
+                self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+            else:
+                print(f"[ERROR] Cliente {cliente_id} tiene un origen no válido: {origen}")
+
+        pygame.display.flip()
+
+
+    def finalizar_servicio_cliente(self, cliente_id):
+        # Llamada al finalizar el servicio, elimina al cliente del mapa
+        if cliente_id in self.localizaciones_clientes:
+            del self.localizaciones_clientes[cliente_id]
+        self.dibujar_mapa()  # Actualiza el mapa después de eliminar el cliente
 
 
     # def actualizar_pygame(self):
@@ -458,15 +472,38 @@ class ECCentral:
     #     self.producer.send('respuesta_auth_taxi', json.dumps(mensaje).encode())
 
     def procesar_peticion_cliente(self, peticion):
-        # Procesa cada petición de servicio de taxi de los clientes
         cliente_id = peticion.get('cliente_id')
         destino = peticion.get('destino')
         destino_coord = self.localizaciones.get(destino)
+
         if not destino_coord:
             print(f"[CENTRAL] Destino {destino} no encontrado.")
             self.enviar_mensaje_cliente(cliente_id, 'KO')
-            return                                        
+            return
+
         print(f"[CENTRAL] Recibida petición de cliente {cliente_id} para destino {destino_coord}")
+
+        # Convertir el origen del cliente a formato (x, y)
+        origen_cliente = peticion.get('origen')
+        if isinstance(origen_cliente, str):
+            try:
+                x, y = map(int, origen_cliente.split(','))  # Divide y convierte a enteros
+                origen_cliente = (x, y)
+                self.localizaciones_clientes[cliente_id] = {
+                    'origen': origen_cliente,  # Origen en formato (x, y)
+                    'destino': destino_coord   # Destino del cliente
+                }
+            except ValueError:
+                print(f"Formato incorrecto para el origen del cliente {cliente_id}: {origen_cliente}")
+                return
+        else:
+            print(f"Formato no válido para el origen del cliente {cliente_id}: {origen_cliente}")
+            return
+
+        # Dibuja el mapa con el cliente registrado
+        self.dibujar_mapa()
+
+        # Asigna un taxi al cliente
         taxi_asignado = self.asignar_taxi(cliente_id, destino_coord)
         if taxi_asignado:
             print(f"[CENTRAL] Servicio aceptado para el cliente {cliente_id}. Enviando taxi {taxi_asignado}.")
@@ -543,15 +580,25 @@ class ECCentral:
 
     
     def enviar_taxi(self, taxi_id, cliente_id, destino):
-        # Enviar instrucciones al taxi
         taxi_info = self.taxis_autenticados.get(taxi_id)
+        cliente_origen = self.localizaciones_clientes[cliente_id]['origen']  # Origen del cliente
+
         if taxi_info:
-            print(f"Taxi {taxi_id} comenzando movimiento hacia {destino}.")
+            print(f"Taxi {taxi_id} se dirige a recoger al cliente {cliente_id} en {cliente_origen}.")
             taxi_info['estado'] = 'RUN'
             self.actualizar_mapa = True
+            # Instrucción para mover al taxi al origen del cliente
+            self.enviar_instrucciones_taxi(taxi_id, cliente_origen)
+
+            # Espera hasta que el taxi llegue al origen
+            print(f"Taxi {taxi_id} ha llegado a {cliente_origen} para recoger al cliente.")
+
+            # Después de recoger al cliente, se dirige al destino
+            print(f"Taxi {taxi_id} llevando al cliente {cliente_id} a {destino}.")
             self.enviar_instrucciones_taxi(taxi_id, destino)
         else:
             print(f"[CENTRAL] No se pudo enviar taxi {taxi_id} al cliente {cliente_id}.")
+
 
     def calcular_siguiente_paso(self, posicion_actual, destino):
         """Calcula el siguiente paso en el trayecto del taxi hacia su destino"""
@@ -646,6 +693,21 @@ class ECCentral:
             print(f"[CENTRAL] Comando '{comando}' enviado al taxi {taxi_id}")
         else:
             print(f"[CENTRAL] No se pudo enviar comando al taxi {taxi_id}. Socket no encontrado.")
+
+    def actualizar_ruta_taxi(self, taxi_id, origen, destino):
+        ruta = {
+            "origen": origen,
+            "destino": destino
+        }
+        archivo_ruta = f"EC_Route_Taxi_{taxi_id}.json"
+        try:
+            with open(archivo_ruta, 'a') as archivo:
+                json.dump(ruta, archivo)
+                archivo.write("\n")  # Nueva línea para cada ruta
+            print(f"[CENTRAL] Ruta actualizada en {archivo_ruta} para taxi {taxi_id}.")
+        except Exception as e:
+            print(f"[CENTRAL] Error actualizando la ruta de taxi {taxi_id}: {e}")
+
 
         
     def enviar_mapa_actualizado(self):
