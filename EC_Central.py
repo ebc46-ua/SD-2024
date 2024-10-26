@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import socket
 import time
 import kafka
@@ -129,35 +130,32 @@ class ECCentral:
                 print(f"[CENTRAL] Error al enviar mapa actualizado: {e}")
 
     
+
+
     def gestionar_taxi(self, cliente_socket, taxi_id):
         try:
-            buffer = ""  # Inicializar el buffer para acumular mensajes
+            buffer = ""  
+            pattern = re.compile(r'<STX>(.*?)<ETX><LRC>(.*)')
 
             while True:
                 parte_mensaje = cliente_socket.recv(1024).decode()
                 if not parte_mensaje:
-                    break  # Cerrar si no hay más datos
+                    break  
 
-                buffer += parte_mensaje  # Agregar lo recibido al buffer
+                buffer += parte_mensaje 
 
-                # Procesar mensajes completos en el buffer
+            
                 while True:
-                    stx_index = buffer.find('<STX>')
-                    etx_index = buffer.find('<ETX>')
-                    lrc_index = buffer.find('<LRC>')
+                    match = pattern.search(buffer)
+                    if match:
+                        data = match.group(1)
+                        lrc = match.group(2).strip()
+                        mensaje_completo = match.group(0)
+                        buffer = buffer[buffer.find(mensaje_completo) + len(mensaje_completo):]  
 
-                    # Si se encuentra un mensaje completo
-                    if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                        mensaje_completo = buffer[stx_index:etx_index + 5 + len('<LRC>') + 2]  # Ajustar longitud
-                        buffer = buffer[etx_index + 5 + len('<LRC>') + 2:]  # Remover el mensaje completo del buffer
-                        
-                        # Procesar el mensaje completo
                         print(f"[CENTRAL] Mensaje recibido de taxi {taxi_id}: {mensaje_completo}")
-                        # Búsqueda y verificación de formato de mensaje
-                        data = mensaje_completo[stx_index + 5:etx_index]
-                        lrc = mensaje_completo[lrc_index + 5:]
 
-                        # Verificar LRC
+                        # Verifica LRC
                         if self.verificar_lrc(data, lrc):
                             campos = data.split('#')
 
@@ -166,41 +164,58 @@ class ECCentral:
                                 with self.lock:
                                     self.taxis_autenticados[taxi_id]['posicion'] = (x, y)
                                     self.actualizar_mapa = True
-                                self.enviar_respuesta(cliente_socket, 'ACK')  # Confirmación de posición
+                                self.enviar_respuesta(cliente_socket, 'ACK')
                                 self.enviar_mapa_actualizado()
 
-                            elif campos[0] == 'ARRIVED':  # Llegada al origen
-                                cliente_id = self.taxi_cliente.get(taxi_id)
-                                if cliente_id:
-                                    with self.lock:
-                                        cliente_info = self.localizaciones_clientes[cliente_id]
-                                        destino_cliente = cliente_info['destino']
-                                        print(f"[CENTRAL] Taxi {taxi_id} ha recogido al cliente {cliente_id}. Dirigiéndose al destino {destino_cliente}.")
-                                        
-                                        # Marcar cliente en ruta y enviar a taxi destino final
-                                        cliente_info['estado'] = 'EN RUTA'
-                                        self.enviar_mensaje_cliente(cliente_id, 'RECOGIDO')
-                                        self.enviar_mapa_actualizado()
-                                        
-                                        # Enviar instrucciones de destino final al taxi
-                                        data = f'GO#{destino_cliente[0]}#{destino_cliente[1]}'
-                                        lrc = self.calcular_lrc(data)
-                                        mensaje = f"<STX>{data}<ETX><LRC>{lrc}"
-                                        cliente_socket.send(mensaje.encode())
-                                    self.enviar_respuesta(cliente_socket, 'ACK')
-                                else:
-                                    self.enviar_respuesta(cliente_socket, 'NACK')
+                            elif campos[0] == 'ARRIVED':
+                                
+                                self.procesar_arrived(taxi_id, cliente_socket)
                             else:
                                 self.enviar_respuesta(cliente_socket, 'NACK')
                         else:
+                            print(f"[CENTRAL] LRC incorrecto para el mensaje: {mensaje_completo}")
                             self.enviar_respuesta(cliente_socket, 'NACK')
                     else:
-                        break  # Salir del bucle si no hay más mensajes completos
+                        break  
 
         except Exception as e:
             print(f"[CENTRAL] Conexión con taxi {taxi_id} cerrada: {e}")
             cliente_socket.close()
             threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
+
+    def procesar_arrived(self, taxi_id, cliente_socket):
+        cliente_id = self.taxi_cliente.get(taxi_id)
+        if cliente_id:
+            with self.lock:
+                cliente_info = self.localizaciones_clientes[cliente_id]
+                destino_cliente = cliente_info['destino']
+                estado_cliente = cliente_info.get('estado')
+
+                if estado_cliente == 'EN RUTA':
+                    # The taxi has arrived at the final destination
+                    print(f"[CENTRAL] Taxi {taxi_id} ha llegado al destino final con el cliente {cliente_id}.")
+                    # Update taxi and client states
+                    self.taxis_autenticados[taxi_id]['estado'] = 'FREE'
+                    self.actualizar_mapa = True
+                    self.enviar_mensaje_cliente(cliente_id, 'COMPLETED')
+                    # Remove client from records
+                    del self.localizaciones_clientes[cliente_id]
+                    del self.taxi_cliente[taxi_id]
+                else:
+                    # The taxi has arrived at the client's origin
+                    print(f"[CENTRAL] Taxi {taxi_id} ha recogido al cliente {cliente_id}. Dirigiéndose al destino {destino_cliente}.")
+                    cliente_info['estado'] = 'EN RUTA'
+                    self.enviar_mensaje_cliente(cliente_id, 'RECOGIDO')
+                    self.actualizar_mapa = True
+                    # Send instructions to the taxi for the final destination
+                    data = f'GO#{destino_cliente[0]}#{destino_cliente[1]}'
+                    lrc = self.calcular_lrc(data)
+                    mensaje = f"<STX>{data}<ETX><LRC>{lrc}"
+                    cliente_socket.send(mensaje.encode())
+            self.enviar_respuesta(cliente_socket, 'ACK')
+        else:
+            self.enviar_respuesta(cliente_socket, 'NACK')
+
 
     def enviar_respuesta(self, cliente_socket, respuesta):
         """Enviar una respuesta al cliente."""
@@ -752,7 +767,7 @@ class ECCentral:
 
 
         
-    def enviar_mapa_actualizado(self):
+    def enviar_mapa_a_clientes(self):
         # Envía el mapa actualizado a los clientes a través de Kafka
         with self.lock:
             taxis_estado = {}
@@ -766,6 +781,7 @@ class ECCentral:
             }
         self.producer_mapa.send('mapa_estado', json.dumps(mensaje_mapa).encode())
         print("[CENTRAL] Mapa actualizado enviado a los clientes.")
+
         
     def escuchar_peticiones(self):
         # Escucha peticiones tanto de clientes como de taxis (autenticación)
