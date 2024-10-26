@@ -17,6 +17,7 @@ class EC_DE:
         self.stopped_by_command = False  # Indica si el taxi está detenido por un comando
         self.destino_actual = None
         self.conectado_central = False  # Inicializar como False
+        self.buffer = ""
         self.autenticar()
         self.inicio_sensores()
        
@@ -72,39 +73,38 @@ class EC_DE:
                 print("[EC_DE] Esperando recibir mensaje desde la central...")
                 mensaje = self.socket_central.recv(1024).decode()
                 if mensaje:
-                    if mensaje == 'ACK':
-                        print("[EC_DE] ACK recibido de la central.")
-                        continue
-                    print(f"[EC_DE] Mensaje recibido: {mensaje}")
+                    self.buffer += mensaje  # Acumular en el buffer
+                    print(f"[EC_DE] Buffer actual: {self.buffer}")
 
-                    # Extracción de datos usando el nuevo bloque de código
-                    if mensaje.startswith('<STX>') and '<ETX>' in mensaje and '<LRC>' in mensaje:
-                        data_start = mensaje.find('<STX>') + 5
-                        data_end = mensaje.find('<ETX>')
-                        lrc_start = mensaje.find('<LRC>') + 5
-                        data = mensaje[data_start:data_end]
-                        lrc = mensaje[lrc_start:].strip()
+                    # Proceso de extracción de ACK/NACK si están al principio del buffer
+                    while self.buffer.startswith("ACK") or self.buffer.startswith("NACK"):
+                        if self.buffer.startswith("ACK"):
+                            print("[EC_DE] ACK recibido")
+                            self.buffer = self.buffer[3:].strip()  # Eliminar "ACK" del buffer
+                        elif self.buffer.startswith("NACK"):
+                            print("[EC_DE] NACK recibido")
+                            self.buffer = self.buffer[4:].strip()  # Eliminar "NACK" del buffer
 
-                        # Verificar LRC
-                        if self.verificar_lrc(data, lrc):
-                            campos = data.split('#', 1)
-                            # Procesamiento de comandos como antes
-                            if campos[0] == 'GO':
-                                destino = tuple(map(int, campos[1].split('#')))
-                                print(f"[EC_DE] Recibido destino: {destino}")
-                                self.mover_hacia_destino(destino)
-                            elif campos[0] == 'MAP':
-                                map_data = json.loads(campos[1])
-                                print(f"[EC_DE] Recibido mapa actualizado: {map_data}")
-                            elif campos[0] == 'CMD':
-                                comando = campos[1]
-                                self.procesar_comando(comando)
-                            else:
-                                print("[EC_DE] Comando no reconocido.")
+                    # Procesar el resto de los mensajes completos en el buffer
+                    while True:
+                        # Buscar los delimitadores
+                        stx_index = self.buffer.find('<STX>')
+                        etx_index = self.buffer.find('<ETX>')
+                        lrc_index = self.buffer.find('<LRC>')
+
+                        # Verificar si tenemos un mensaje completo
+                        if stx_index != -1 and etx_index != -1 and lrc_index != -1 and etx_index < lrc_index:
+                            # Extraer el mensaje completo
+                            mensaje_completo = self.buffer[stx_index:lrc_index + len('<LRC>') + 2]
+                            self.buffer = self.buffer[lrc_index + len('<LRC>') + 2:].strip()  # Actualizar el buffer
+
+                            print(f"[EC_DE] Mensaje completo recibido: {mensaje_completo}")
+
+                            # Procesar el mensaje completo
+                            self.procesar_mensaje(mensaje_completo)
                         else:
-                            print("[EC_DE] LRC incorrecto.")
-                    else:
-                        print("[EC_DE] Formato de mensaje incorrecto.")
+                            # Salir del loop si no se encuentra un mensaje completo
+                            break
                 else:
                     print("[EC_DE] La conexión fue cerrada por la central.")
                     break
@@ -113,7 +113,42 @@ class EC_DE:
             self.socket_central.close()
 
 
+    def procesar_mensaje(self, mensaje):
+        print(f"[EC_DE] Mensaje original: {mensaje}")  # Mostrar el mensaje recibido
 
+        # Verificar si el mensaje incluye todas las partes: <STX>, <ETX>, y <LRC>
+        if '<STX>' in mensaje and '<ETX>' in mensaje and '<LRC>' in mensaje:
+            # Identificar las posiciones de inicio y final para extraer el contenido entre <STX> y <ETX>
+            data_start = mensaje.find('<STX>') + len('<STX>')
+            data_end = mensaje.find('<ETX>')
+            data = mensaje[data_start:data_end].strip()
+
+            # Extraer el LRC después de <LRC>
+            lrc_start = mensaje.find('<LRC>') + len('<LRC>')
+            lrc = mensaje[lrc_start:].strip()  # Extraer lo que viene después de <LRC>
+
+            # Mensajes de depuración para verificar extracción
+            print(f"[EC_DE] Data extraída: {data}, LRC extraído: {lrc}")
+
+            # Verificar el LRC
+            if lrc and self.verificar_lrc(data, lrc):
+                campos = data.split('#', 1)
+                if campos[0] == 'GO':
+                    destino = tuple(map(int, campos[1].split('#')))
+                    print(f"[EC_DE] Recibido destino: {destino}")
+                    self.mover_hacia_destino(destino)
+                elif campos[0] == 'MAP':
+                    map_data = json.loads(campos[1])
+                    print(f"[EC_DE] Recibido mapa actualizado: {map_data}")
+                elif campos[0] == 'CMD':
+                    comando = campos[1]
+                    self.procesar_comando(comando)
+                else:
+                    print("[EC_DE] Comando no reconocido.")
+            else:
+                print("[EC_DE] LRC incorrecto o no encontrado.")
+        else:
+            print("[EC_DE] Formato de mensaje incorrecto o incompleto.")
 
 
     def procesar_comando(self, comando):
@@ -207,7 +242,7 @@ class EC_DE:
                     print(f"[EC_DE] No se pudo enviar posición a EC_Central: {e}")
                     self.conectado_central = False
                     threading.Thread(target=self.reconectar_central, daemon=True).start()
-                time.sleep(0.5)  # Simular movimiento en tiempo real
+                time.sleep(1)  # Simular movimiento en tiempo real
             else:
                 if not self.stopped:
                     # Enviar estado STOPPED a EC_Central

@@ -166,7 +166,7 @@ class ECCentral:
                                 with self.lock:
                                     self.taxis_autenticados[taxi_id]['posicion'] = (x, y)
                                     self.actualizar_mapa = True
-                                cliente_socket.send('ACK'.encode())  # Confirmación de posición
+                                self.enviar_respuesta(cliente_socket, 'ACK')  # Confirmación de posición
                                 self.enviar_mapa_actualizado()
 
                             elif campos[0] == 'ARRIVED':  # Llegada al origen
@@ -187,11 +187,13 @@ class ECCentral:
                                         lrc = self.calcular_lrc(data)
                                         mensaje = f"<STX>{data}<ETX><LRC>{lrc}"
                                         cliente_socket.send(mensaje.encode())
-                                    cliente_socket.send('ACK'.encode())
+                                    self.enviar_respuesta(cliente_socket, 'ACK')
                                 else:
-                                    cliente_socket.send('NACK'.encode())
+                                    self.enviar_respuesta(cliente_socket, 'NACK')
+                            else:
+                                self.enviar_respuesta(cliente_socket, 'NACK')
                         else:
-                            cliente_socket.send('NACK'.encode())
+                            self.enviar_respuesta(cliente_socket, 'NACK')
                     else:
                         break  # Salir del bucle si no hay más mensajes completos
 
@@ -200,7 +202,12 @@ class ECCentral:
             cliente_socket.close()
             threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
 
-
+    def enviar_respuesta(self, cliente_socket, respuesta):
+        """Enviar una respuesta al cliente."""
+        try:
+            cliente_socket.send(respuesta.encode())
+        except Exception as e:
+            print(f"[ERROR] Al enviar respuesta: {e}")
 
 
     def recibir_mensajes(cliente_socket):
@@ -360,7 +367,7 @@ class ECCentral:
                     posicion = taxi.get('posicion', [1, 1])
 
                     # Validar estado
-                    if estado not in ['FREE', 'BUSY', 'STOPPED', 'END']:
+                    if estado not in ['FREE', 'BUSY', 'STOPPED', 'END',]:
                         print(f"Estado '{estado}' no reconocido para el taxi {taxi_id}. Taxi omitido.")
                         continue
 
