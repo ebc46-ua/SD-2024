@@ -76,28 +76,26 @@ class EC_DE:
                         print("[EC_DE] ACK recibido de la central.")
                         continue
                     print(f"[EC_DE] Mensaje recibido: {mensaje}")
-                    # Procesar mensaje
-                    stx_index = mensaje.find('<STX>')
-                    etx_index = mensaje.find('<ETX>')
-                    lrc_index = mensaje.find('<LRC>')
 
-                    if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                        data = mensaje[stx_index + 5:etx_index]
-                        lrc = mensaje[lrc_index + 5:]  # Esto debería ser correcto
-                        lrc = lrc.strip()  # Asegúrate de que no haya espacios en blanco
+                    # Extracción de datos usando el nuevo bloque de código
+                    if mensaje.startswith('<STX>') and '<ETX>' in mensaje and '<LRC>' in mensaje:
+                        data_start = mensaje.find('<STX>') + 5
+                        data_end = mensaje.find('<ETX>')
+                        lrc_start = mensaje.find('<LRC>') + 5
+                        data = mensaje[data_start:data_end]
+                        lrc = mensaje[lrc_start:].strip()
+
                         # Verificar LRC
                         if self.verificar_lrc(data, lrc):
                             campos = data.split('#', 1)
+                            # Procesamiento de comandos como antes
                             if campos[0] == 'GO':
                                 destino = tuple(map(int, campos[1].split('#')))
                                 print(f"[EC_DE] Recibido destino: {destino}")
-                                # Comenzar movimiento hacia el destino
                                 self.mover_hacia_destino(destino)
                             elif campos[0] == 'MAP':
-                                # Procesar el estado del mapa
                                 map_data = json.loads(campos[1])
                                 print(f"[EC_DE] Recibido mapa actualizado: {map_data}")
-                                # Aquí puedes actualizar tu representación interna del mapa si es necesario
                             elif campos[0] == 'CMD':
                                 comando = campos[1]
                                 self.procesar_comando(comando)
@@ -108,12 +106,12 @@ class EC_DE:
                     else:
                         print("[EC_DE] Formato de mensaje incorrecto.")
                 else:
-                    # El servidor cerró la conexión
                     print("[EC_DE] La conexión fue cerrada por la central.")
                     break
         except Exception as e:
             print(f"[EC_DE] Error en la conexión: {e}")
             self.socket_central.close()
+
 
 
 
@@ -185,7 +183,7 @@ class EC_DE:
         calculated_lrc = self.calcular_lrc(data)
         return str(calculated_lrc) == lrc.strip()  # Compara correctamente
 
-    def mover_hacia_destino(self, destino):
+    def mover_hacia_destino(self, destino, es_destino_final=False):
         while self.posicion != destino:
             if self.stopped_by_command:
                 print("[EC_DE] Taxi detenido por comando.")
@@ -205,8 +203,6 @@ class EC_DE:
                 mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
                 try:
                     self.socket_central.send(mensaje.encode())
-                    # Ya no esperamos el ACK aquí
-                    # Dejar que 'escuchar_instrucciones' lo maneje
                 except Exception as e:
                     print(f"[EC_DE] No se pudo enviar posición a EC_Central: {e}")
                     self.conectado_central = False
@@ -219,18 +215,25 @@ class EC_DE:
                     self.stopped = True
                 print("[EC_DE] Taxi detenido debido a una contingencia.")
                 time.sleep(1)
-        print("[EC_DE] Llegué al destino.")
-        # Cambiar estado a 'END' y notificar a EC_Central si está conectado
-        self.state = 'END'
+        
+        # Si llega al destino, envía `ARRIVED` o `END` según corresponda
+        if es_destino_final:
+            print("[EC_DE] Llegué al destino final.")
+            self.state = 'END'
+        else:
+            print("[EC_DE] Llegué al origen del cliente.")
+            self.state = 'ARRIVED'
+
         if self.conectado_central:
-            self.enviar_estado('END')
+            self.enviar_estado(self.state)
         else:
             print("[EC_DE] No hay conexión con EC_Central. Taxi detenido.")
-        # Esperar nuevas instrucciones solo si está conectado
+
         if self.conectado_central:
             print("[EC_DE] Esperando nuevas instrucciones de EC_Central.")
         else:
             print("[EC_DE] No se puede continuar sin conexión a EC_Central.")
+
 
 
 

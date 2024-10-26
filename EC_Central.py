@@ -130,89 +130,105 @@ class ECCentral:
 
     
     def gestionar_taxi(self, cliente_socket, taxi_id):
-        # Mantener comunicación con el taxi
         try:
-            while True:
-                mensaje = cliente_socket.recv(1024).decode()
-                print('Gestinando taxi \n')
-                if mensaje:
-                    # Procesar mensajes del taxi
-                    print(f"[CENTRAL] Mensaje recibido de taxi {taxi_id}: {mensaje}")
-                    # Extraer <STX>, <DATA>, <ETX>, <LRC>
-                    stx_index = mensaje.find('<STX>')
-                    etx_index = mensaje.find('<ETX>')
-                    lrc_index = mensaje.find('<LRC>')
+            buffer = ""  # Inicializar el buffer para acumular mensajes
 
+            while True:
+                parte_mensaje = cliente_socket.recv(1024).decode()
+                if not parte_mensaje:
+                    break  # Cerrar si no hay más datos
+
+                buffer += parte_mensaje  # Agregar lo recibido al buffer
+
+                # Procesar mensajes completos en el buffer
+                while True:
+                    stx_index = buffer.find('<STX>')
+                    etx_index = buffer.find('<ETX>')
+                    lrc_index = buffer.find('<LRC>')
+
+                    # Si se encuentra un mensaje completo
                     if stx_index != -1 and etx_index != -1 and lrc_index != -1:
-                        data = mensaje[stx_index + 5:etx_index]
-                        lrc = mensaje[lrc_index + 5:]
+                        mensaje_completo = buffer[stx_index:etx_index + 5 + len('<LRC>') + 2]  # Ajustar longitud
+                        buffer = buffer[etx_index + 5 + len('<LRC>') + 2:]  # Remover el mensaje completo del buffer
+                        
+                        # Procesar el mensaje completo
+                        print(f"[CENTRAL] Mensaje recibido de taxi {taxi_id}: {mensaje_completo}")
+                        # Búsqueda y verificación de formato de mensaje
+                        data = mensaje_completo[stx_index + 5:etx_index]
+                        lrc = mensaje_completo[lrc_index + 5:]
+
                         # Verificar LRC
                         if self.verificar_lrc(data, lrc):
                             campos = data.split('#')
+
                             if campos[0] == 'POS':
-                                # Actualizar posición del taxi
                                 x, y = int(campos[1]), int(campos[2])
                                 with self.lock:
                                     self.taxis_autenticados[taxi_id]['posicion'] = (x, y)
                                     self.actualizar_mapa = True
-                                # Enviar ACK
-                                cliente_socket.send('ACK'.encode())
-                                # Enviar mapa actualizado a todos los taxis
-                                self.enviar_mapa_actualizado()
-                            elif campos[0] == 'STATUS':
-                                estado = campos[1]
-                                print(f"[CENTRAL] Taxi {taxi_id} está en estado '{estado}'")
-                                with self.lock:
-                                    self.taxis_autenticados[taxi_id]['estado'] = estado
-                                    self.actualizar_mapa = True
-                                # Enviar ACK
-                                cliente_socket.send('ACK'.encode())
-                                # Enviar mapa actualizado a todos los taxis
+                                cliente_socket.send('ACK'.encode())  # Confirmación de posición
                                 self.enviar_mapa_actualizado()
 
-                                # Si el estado es 'END', enviar nuevas instrucciones
-                                if estado == 'END':
-                                    print(f"[CENTRAL] Taxi {taxi_id} ha finalizado el servicio.")
-                                    with self.lock:
-                                        self.taxis_autenticados[taxi_id]['estado'] = 'FREE'
-                                        self.actualizar_mapa = True
-                                    # Notificar al cliente
-                                    with self.lock:
-                                        cliente_id = self.taxi_cliente.get(taxi_id)
-                                        if cliente_id:
-                                            self.enviar_mensaje_cliente(cliente_id, 'COMPLETED')
-                                            del self.taxi_cliente[taxi_id]
-
-                                    # Aquí puedes enviar nuevas instrucciones
-                                    # Por ejemplo, si hay un nuevo destino:
-                                    nuevo_destino = (8, 16)  # Ejemplo de nuevas coordenadas
-                                    self.enviar_instrucciones_taxi(taxi_id, nuevo_destino)
-                            elif campos[0] == 'ARRIVED':  # Indica que el taxi ha llegado
+                            elif campos[0] == 'ARRIVED':  # Llegada al origen
                                 cliente_id = self.taxi_cliente.get(taxi_id)
                                 if cliente_id:
                                     with self.lock:
-                                        # Cambiar estado a 'RECOGIDO' y eliminar del diccionario
-                                        self.localizaciones_clientes[cliente_id]['estado'] = 'RECOGIDO'
-                                        del self.localizaciones_clientes[cliente_id]  # Elimina al cliente del mapa
-                                        self.actualizar_mapa = True
-
-                                    # Actualizar el mapa visualmente y notificar a los taxis
-                                    self.dibujar_mapa()
-                                    self.enviar_mapa_actualizado()
-
-                            else:
-                                cliente_socket.send('NACK'.encode())
+                                        cliente_info = self.localizaciones_clientes[cliente_id]
+                                        destino_cliente = cliente_info['destino']
+                                        print(f"[CENTRAL] Taxi {taxi_id} ha recogido al cliente {cliente_id}. Dirigiéndose al destino {destino_cliente}.")
+                                        
+                                        # Marcar cliente en ruta y enviar a taxi destino final
+                                        cliente_info['estado'] = 'EN RUTA'
+                                        self.enviar_mensaje_cliente(cliente_id, 'RECOGIDO')
+                                        self.enviar_mapa_actualizado()
+                                        
+                                        # Enviar instrucciones de destino final al taxi
+                                        data = f'GO#{destino_cliente[0]}#{destino_cliente[1]}'
+                                        lrc = self.calcular_lrc(data)
+                                        mensaje = f"<STX>{data}<ETX><LRC>{lrc}"
+                                        cliente_socket.send(mensaje.encode())
+                                    cliente_socket.send('ACK'.encode())
+                                else:
+                                    cliente_socket.send('NACK'.encode())
                         else:
                             cliente_socket.send('NACK'.encode())
                     else:
-                        cliente_socket.send('NACK'.encode())
-                else:
-                    break
+                        break  # Salir del bucle si no hay más mensajes completos
+
         except Exception as e:
             print(f"[CENTRAL] Conexión con taxi {taxi_id} cerrada: {e}")
             cliente_socket.close()
-            # Iniciar temporizador de 10 segundos antes de marcar incidencia
             threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
+
+
+
+
+    def recibir_mensajes(cliente_socket):
+        buffer = ""
+        while True:
+            try:
+                parte_mensaje = cliente_socket.recv(1024).decode()
+                if not parte_mensaje:
+                    break  # Cerrar si no hay más datos
+                buffer += parte_mensaje  # Agregar al buffer
+
+                # Procesar mensajes completos en el buffer
+                while True:
+                    stx_index = buffer.find('<STX>')
+                    etx_index = buffer.find('<ETX>')
+                    lrc_index = buffer.find('<LRC>')
+
+                    # Si se encuentra un mensaje completo
+                    if stx_index != -1 and etx_index != -1 and lrc_index != -1:
+                        mensaje_completo = buffer[stx_index:etx_index + 5 + len('<LRC>') + 2]  # Ajusta la longitud
+                        buffer = buffer[etx_index + 5 + len('<LRC>') + 2:]  # Remueve el mensaje completo del buffer
+                        procesar_mensaje(mensaje_completo)  # Procesar el mensaje completo
+                    else:
+                        break  # Salir del bucle si no hay más mensajes completos
+
+            except Exception as e:
+                print(f"[ERROR] Al recibir mensajes: {e}")
+                break
 
 
             
@@ -286,7 +302,7 @@ class ECCentral:
             for taxi_id, taxi_info in self.taxis_autenticados.items():
                 x, y = taxi_info['posicion']
                 rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-                color_taxi = (0, 255, 0) if taxi_info['estado'] == 'RUN' else (255, 0, 0)
+                color_taxi = (0, 255, 0) if taxi_info['estado'] == 'RUN' or taxi_info['estado'] == 'BUSY' else (255, 0, 0)
                 pygame.draw.rect(self.ventana, color_taxi, rect)
                 img = self.font.render(str(taxi_id), True, (255, 255, 255))
                 self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
@@ -605,17 +621,18 @@ class ECCentral:
             print(f"Taxi {taxi_id} se dirige a recoger al cliente {cliente_id} en {cliente_origen}.")
             taxi_info['estado'] = 'RUN'
             self.actualizar_mapa = True
-            # Instrucción para mover al taxi al origen del cliente
             self.enviar_instrucciones_taxi(taxi_id, cliente_origen)
 
-            # Espera hasta que el taxi llegue al origen
+            # Una vez en el origen, cambia el estado del cliente a "RECOGIDO"
             print(f"Taxi {taxi_id} ha llegado a {cliente_origen} para recoger al cliente.")
-
-            # Después de recoger al cliente, se dirige al destino
+            self.localizaciones_clientes[cliente_id]['estado'] = 'RECOGIDO'
+            
+            # Instrucciones para llevar al cliente al destino
             print(f"Taxi {taxi_id} llevando al cliente {cliente_id} a {destino}.")
             self.enviar_instrucciones_taxi(taxi_id, destino)
         else:
             print(f"[CENTRAL] No se pudo enviar taxi {taxi_id} al cliente {cliente_id}.")
+
 
 
     def calcular_siguiente_paso(self, posicion_actual, destino):
