@@ -20,7 +20,7 @@ class ECCentral:
         self.map_path = map_path
         self.mapa = [[' ' for _ in range(20)] for _ in range(20)]  # Mapa 20x20 vacío
         self.taxis_disponibles = {}
-        self.clientes_activos = []
+        self.clientes_activos = {}
         self.taxi_cliente = {}  # Diccionario para asociar taxi_id con cliente_id
         self.taxis_autenticados = {}
         self.sockets_taxis = {}  # Almacenar los sockets de los taxis
@@ -42,10 +42,10 @@ class ECCentral:
         self.tamaño_celda = 20    # Tamaño de cada celda en píxeles
         self.ventana = pygame.display.set_mode((self.ancho_ventana, self.alto_ventana))
         pygame.display.set_caption("Mapa de Taxis")
-        self.font = pygame.font.SysFont(None, 14)
+        self.font = pygame.font.SysFont(None, 24)
         self.actualizar_mapa = True
         self.actualizar_tabla = True
-        self.screen = pygame.display.set_mode((900, 400))
+        self.screen = pygame.display.set_mode((1250, 400))
         pygame.display.set_caption("Estado de Taxis y Clientes")
         self.clock = pygame.time.Clock()  # Para manejar la tasa de refresc
  
@@ -200,22 +200,21 @@ class ECCentral:
                 if estado_cliente == 'EN RUTA':
                     # The taxi has arrived at the final destination
                     print(f"[CENTRAL] Taxi {taxi_id} ha llegado al destino final con el cliente {cliente_id}.")
-                    # Update taxi and client states
+                    # Actualizar estados del cliente
                     self.taxis_autenticados[taxi_id]['estado'] = 'FREE'
                     self.taxis_autenticados[taxi_id].pop('destino', None)
                     self.actualizar_mapa = True
                     self.actualizar_tabla = True
                     self.enviar_mensaje_cliente(cliente_id, 'COMPLETED')
-                    # Remove client from records
+                    # Borrar el cliente 
                     del self.localizaciones_clientes[cliente_id]
                     del self.taxi_cliente[taxi_id]
                 else:
-                    # The taxi has arrived at the client's origin
                     print(f"[CENTRAL] Taxi {taxi_id} ha recogido al cliente {cliente_id}. Dirigiéndose al destino {destino_cliente}.")
                     cliente_info['estado'] = 'EN RUTA'
                     self.enviar_mensaje_cliente(cliente_id, 'RECOGIDO')
                     self.actualizar_mapa = True
-                    # Send instructions to the taxi for the final destination
+                    # Mandar instrucciones del destino final al taxi
                     data = f'GO#{destino_cliente[0]}#{destino_cliente[1]}'
                     lrc = self.calcular_lrc(data)
                     mensaje = f"<STX>{data}<ETX><LRC>{lrc}"
@@ -294,9 +293,9 @@ class ECCentral:
         for id_localizacion, coord in self.localizaciones.items():
             x, y = coord
             rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-            pygame.draw.rect(self.ventana, (0, 0, 255), rect)  # Color azul para las localizaciones
-            img = self.font.render(id_localizacion, True, (255, 255, 255))
-            self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+            pygame.draw.rect(self.ventana, (23, 196, 247), rect)  # Color azul para las localizaciones
+            img = self.font.render(id_localizacion, True, (0, 0, 0))
+            self.ventana.blit(img, (x * self.tamaño_celda + 4, y * self.tamaño_celda + 3))
 
         # Dibujar los taxis
         with self.lock:
@@ -305,8 +304,8 @@ class ECCentral:
                 rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
                 color_taxi = (0, 255, 0) if taxi_info['estado'] == 'RUN' or taxi_info['estado'] == 'BUSY' else (255, 0, 0)
                 pygame.draw.rect(self.ventana, color_taxi, rect)
-                img = self.font.render(str(taxi_id), True, (255, 255, 255))
-                self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+                img = self.font.render(str(taxi_id), True, (0, 0, 0))
+                self.ventana.blit(img, (x * self.tamaño_celda + 4, y * self.tamaño_celda + 3))
 
         # Dibujar los clientes
         for cliente_id, info_cliente in self.localizaciones_clientes.items():
@@ -315,27 +314,37 @@ class ECCentral:
                 x, y = origen
                 rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
                 pygame.draw.rect(self.ventana, (255, 255, 0), rect)  
-                img = self.font.render(f"C{cliente_id}", True, (255, 255, 255))
-                self.ventana.blit(img, (x * self.tamaño_celda + 2, y * self.tamaño_celda + 2))
+                img = self.font.render(f"{cliente_id}", True, (0, 0, 0))
+                self.ventana.blit(img, (x * self.tamaño_celda + 4, y * self.tamaño_celda + 3))
             else:
                 print(f"[ERROR] Cliente {cliente_id} tiene un origen no válido: {origen}")
 
         pygame.display.flip()
 
 
+    def int_a_char(cliente_id):
+        # Asumimos que cliente_id es un entero a partir de 1
+        return chr(ord('a') + cliente_id - 1)  # Mapea 1 -> 'a', 2 -> 'b', ...
+
     def dibujar_tabla_estados(self):
-        # Dibujar la tabla en la sección derecha de la ventana
+        # Colores
         WHITE = (255, 255, 255)
         BLACK = (0, 0, 0)
         LIGHT_GRAY = (200, 200, 200)
 
-        # Configuración para la tabla de taxis y clientes
-        x_start = self.ancho_ventana/2 + 20 # Iniciar la tabla a la derecha del mapa
+        # Configuración inicial
+        x_start = self.ancho_ventana / 2 + 20  # Iniciar la tabla a la derecha del mapa
         y_start = 10
         cell_width = 125
         cell_height = 30
 
-        # Dibujar encabezados de la tabla de taxis
+        # Dibujar el encabezado central
+        header_text = "*** EASY CAB Release 1 ***"
+        text_surface = self.font.render(header_text, True, BLACK)
+        self.screen.blit(text_surface, (x_start + cell_width, y_start))
+        y_start += cell_height  # Mover hacia abajo para iniciar las tablas
+
+        # Encabezados de la tabla de taxis
         headers = ["ID Taxi", "Destino", "Estado"]
         for i, header in enumerate(headers):
             pygame.draw.rect(self.screen, LIGHT_GRAY, (x_start + i * cell_width, y_start, cell_width, cell_height))
@@ -345,7 +354,6 @@ class ECCentral:
         # Dibujar los datos de la tabla de taxis
         for j, (taxi_id, info) in enumerate(self.taxis_disponibles.items()):
             row_y = y_start + (j + 1) * cell_height
-            # Utilizar un valor predeterminado si 'destino' no existe
             destino = info.get('destino', "No asignado")
             taxi_data = [taxi_id, destino, info['estado']]
             for i, data in enumerate(taxi_data):
@@ -353,31 +361,36 @@ class ECCentral:
                 text_surface = self.font.render(str(data), True, BLACK)
                 self.screen.blit(text_surface, (x_start + i * cell_width + 10, row_y + 5))
 
+        # Separación vertical entre la tabla de taxis y la de clientes
+        separator_x = x_start + 3 * cell_width + 10  # Espacio para tres columnas de taxis
+        pygame.draw.line(self.screen, BLACK, (separator_x, y_start), (separator_x, y_start + (len(self.taxis_disponibles) + 1) * cell_height), 2)
 
-        # Dibujar encabezados de la tabla de clientes
+        # Encabezados de la tabla de clientes
         client_headers = ["ID Cliente", "Destino", "Estado"]
-        y_start_clients = y_start + (len(self.taxis_disponibles) + 2) * cell_height
         for i, header in enumerate(client_headers):
-            pygame.draw.rect(self.screen, LIGHT_GRAY, (x_start + i * cell_width, y_start_clients, cell_width, cell_height))
+            pygame.draw.rect(self.screen, LIGHT_GRAY, (separator_x + 10 + i * cell_width, y_start, cell_width, cell_height))
             text_surface = self.font.render(header, True, BLACK)
-            self.screen.blit(text_surface, (x_start + i * cell_width + 10, y_start_clients + 5))
+            self.screen.blit(text_surface, (separator_x + 10 + i * cell_width + 10, y_start + 5))
 
         # Dibujar los datos de la tabla de clientes
-        for j, cliente in enumerate(self.clientes_activos):
-            row_y = y_start_clients + (j + 1) * cell_height
-            client_data = [cliente['cliente_id'], cliente['destino'], cliente['estado']]
+        for j, (cliente_id, info) in enumerate(self.clientes_activos.items()):
+            row_y = y_start + (j + 1) * cell_height
+            client_data = [cliente_id, info.get('destino', 'N/A'), info.get('estado', 'N/A')]  # Definir client_data aquí
             for i, data in enumerate(client_data):
-                pygame.draw.rect(self.screen, WHITE, (x_start + i * cell_width, row_y, cell_width, cell_height), 1)
+                pygame.draw.rect(self.screen, WHITE, (separator_x + 10 + i * cell_width, row_y, cell_width, cell_height), 1)
                 text_surface = self.font.render(str(data), True, BLACK)
-                self.screen.blit(text_surface, (x_start + i * cell_width + 10, row_y + 5))
+                self.screen.blit(text_surface, (separator_x + 10 + i * cell_width + 10, row_y + 5))
 
         pygame.display.flip()  # Actualizar pantalla
+
+
 
 
     def finalizar_servicio_cliente(self, cliente_id):
         # Llamada al finalizar el servicio, elimina al cliente del mapa
         if cliente_id in self.localizaciones_clientes:
             del self.localizaciones_clientes[cliente_id]
+            del self.clientes_activos[cliente_id]
         self.dibujar_mapa()  # Actualiza el mapa después de eliminar el cliente
         self.dibujar_tabla_estados()
 
@@ -561,6 +574,14 @@ class ECCentral:
     #     }
     #     self.producer.send('respuesta_auth_taxi', json.dumps(mensaje).encode())
 
+    def agregar_cliente(self, cliente_id, destino):
+        # Agregar cliente al diccionario
+        self.clientes_activos[cliente_id] = {
+            'destino': self.localizaciones.get(destino),
+            'estado': 'activo'
+        }
+        print(f"[CENTRAL] Cliente {cliente_id} agregado.")
+
     def procesar_peticion_cliente(self, peticion):
         cliente_id = peticion.get('cliente_id')
         destino = peticion.get('destino')
@@ -583,6 +604,7 @@ class ECCentral:
                     'origen': origen_cliente,  # Origen en formato (x, y)
                     'destino': destino_coord   # Destino del cliente
                 }
+                self.agregar_cliente(cliente_id, destino)
             except ValueError:
                 print(f"Formato incorrecto para el origen del cliente {cliente_id}: {origen_cliente}")
                 return

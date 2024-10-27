@@ -16,7 +16,7 @@ class ECCustomer:
             group_id='clientes',
             auto_offset_reset='earliest'
         )
-        self.cliente_id = cliente_id  # Asignamos un ID único al cliente
+        self.cliente_id = cliente_id  # cliente_id es ahora un string
         self.solicitudes_pendientes = []  # Lista de solicitudes pendientes por cliente
         self.solicitud_enviada = False
         self.cargar_solicitudes()
@@ -27,9 +27,12 @@ class ECCustomer:
                 requests_data = json.load(archivo_requests)
                 total_requests = requests_data['Requests']
 
-                # Verificar que el cliente_id no excede el número de solicitudes
-                if self.cliente_id <= len(total_requests):
-                    index = self.cliente_id - 1  # Índice basado en cliente_id
+                # Mapeo de cliente_id (letra) a índice
+                # 'a' -> 0, 'b' -> 1, 'c' -> 2, etc.
+                index = ord(self.cliente_id) - ord('a')
+
+                # Verificar que el índice sea válido
+                if 0 <= index < len(total_requests):
                     solicitud = total_requests[index]
                     self.solicitudes_pendientes = [solicitud]
                     print(f"[CLIENTE {self.cliente_id}] Solicitud asignada: {solicitud}")
@@ -47,7 +50,7 @@ class ECCustomer:
                 destino_id = request['Id']
                 origen_coord = request['Start']
                 mensaje = {
-                    'cliente_id': self.cliente_id,
+                    'cliente_id': self.cliente_id,  # cliente_id sigue siendo un string
                     'origen': origen_coord,
                     'destino': destino_id
                 }
@@ -66,7 +69,7 @@ class ECCustomer:
             cliente_id_respuesta = respuesta.get('cliente_id')
             estado = respuesta.get('estado')
 
-            if cliente_id_respuesta == self.cliente_id:
+            if cliente_id_respuesta == self.cliente_id:  # Comparación con cliente_id como string
                 if estado == 'OK':
                     print(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi está en camino.")
                 elif estado == 'KO':
@@ -92,14 +95,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ejecutar EC_Customer con parámetros de conexión y autenticación.")
 
     parser.add_argument('broker_ip', type=str, help='IP del Broker de Kafka')  # Broker IP y Puerto
-    parser.add_argument('cliente_id', type=int, help='ID del cliente')
+    parser.add_argument('cliente_id', type=str, help='ID del cliente (como letra)')
 
     args = parser.parse_args()
 
     broker_ip = args.broker_ip
-    cliente_id = args.cliente_id
+    cliente_id = args.cliente_id 
 
     requests_path = "EC_Requests.json"
 
     ec_customer = ECCustomer(broker_ip, requests_path, cliente_id)
     ec_customer.iniciar()
+
