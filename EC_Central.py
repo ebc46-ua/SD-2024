@@ -11,6 +11,8 @@ import threading
 from kafka import KafkaProducer, KafkaConsumer 
 import argparse
 from prettytable import PrettyTable
+import tkinter as tk
+from tkinter import messagebox, simpledialog
  
 class ECCentral:
     def __init__(self, puerto_escucha, broker_ip, db_path, map_path):
@@ -26,7 +28,7 @@ class ECCentral:
         self.sockets_taxis = {}  # Almacenar los sockets de los taxis
         self.lock = threading.Lock()  # Lock para proteger acceso a datos compartidos
         self.quit = False  # Flag para indicar salida del programa
-        self.actualizar_mapa = False  # Flag para indicar actualización del mapa
+        self.actualizar_mapa = False # Flag para indicar actualización del mapa
         self.actualizar_tabla = False
         
         self.cargar_localizaciones()  # Carga las localizaciones desde el archivo JSON
@@ -47,11 +49,12 @@ class ECCentral:
         self.actualizar_tabla = True
         self.screen = pygame.display.set_mode((1250, 400))
         pygame.display.set_caption("Estado de Taxis y Clientes")
-        self.clock = pygame.time.Clock()  # Para manejar la tasa de refresc
+        self.clock = pygame.time.Clock()  # Para manejar la tasa de refresco
+
  
     def iniciar_servidor_sockets(self):
         self.servidor_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.servidor_socket.bind(('localhost', self.puerto_escucha))
+        self.servidor_socket.bind(('0.0.0.0', self.puerto_escucha))
         self.servidor_socket.listen(5)
         threading.Thread(target=self.aceptar_conexiones_taxis, daemon=True).start()
         print(f"[CENTRAL] Servidor de sockets iniciado en el puerto {self.puerto_escucha}")
@@ -150,7 +153,6 @@ class ECCentral:
 
                 buffer += parte_mensaje 
 
-            
                 while True:
                     match = pattern.search(buffer)
                     if match:
@@ -173,9 +175,16 @@ class ECCentral:
                                 self.enviar_respuesta(cliente_socket, 'ACK')
                                 self.enviar_mapa_actualizado()
 
-                            elif campos[0].strip() == 'STATUS' and campos[1].strip() == 'ARRIVED':
-                                
-                                self.procesar_arrived(taxi_id, cliente_socket)
+                            elif campos[0].strip() == 'STATUS':
+                                if campos[1].strip() == 'ARRIVED':
+                                    self.procesar_arrived(taxi_id, cliente_socket)
+                                elif campos[1].strip() == 'STOPPED':
+                                    with self.lock:
+                                        self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
+                                        self.dibujar_mapa()
+                                        self.dibujar_tabla_estados()
+                                        print(f"[CENTRAL] Estado de taxi {taxi_id} actualizado a 'stopped'.")
+                                    self.enviar_respuesta(cliente_socket, 'ACK')
                             else:
                                 self.enviar_respuesta(cliente_socket, 'NACK')
                         else:
@@ -269,26 +278,96 @@ class ECCentral:
                 del self.taxi_cliente[taxi_id]
             
     def run(self):
-        # Iniciar hilos para manejar conexiones y Kafka
         threading.Thread(target=self.procesar_comandos_arbitrarios, daemon=True).start()
         threading.Thread(target=self.procesar_peticiones_kafka, daemon=True).start()
+
+        threading.Thread(target=self.setup_command_interface, daemon=True).start()
 
         clock = pygame.time.Clock()
         while not self.quit:
             for evento in pygame.event.get():
                 if evento.type == pygame.QUIT:
                     self.quit = True
-                    pygame.quit()
                     break
 
             if self.actualizar_mapa:
                 self.dibujar_mapa()
                 self.dibujar_tabla_estados()
                 pygame.display.flip()
-                self.actualizar_mapa = False
+                self.actualizar_mapa = False  # Reiniciar el flag de actualización
 
             clock.tick(60)  # Limitar a 60 FPS
     
+    def setup_command_interface(self):
+        self.root = tk.Tk()
+        self.root.title("Control Central de Taxis")
+
+        self.taxi_id_label = tk.Label(self.root, text="Seleccione el Taxi ID:")
+        self.taxi_id_label.pack()
+
+        self.taxi_id_entry = tk.Entry(self.root)
+        self.taxi_id_entry.pack()
+
+        self.parar_button = tk.Button(self.root, text="Parar", command=self.comando_parar)
+        self.parar_button.pack(pady=5)
+
+        self.reanudar_button = tk.Button(self.root, text="Reanudar", command=self.comando_reanudar)
+        self.reanudar_button.pack(pady=5)
+
+        self.ir_a_destino_button = tk.Button(self.root, text="Ir a Destino", command=self.comando_ir_a_destino)
+        self.ir_a_destino_button.pack(pady=5)
+
+        self.volver_base_button = tk.Button(self.root, text="Volver a Base", command=self.comando_volver_base)
+        self.volver_base_button.pack(pady=5)
+
+        # Iniciar el bucle de eventos de tkinter
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.mainloop()
+
+    def on_closing(self):
+        self.quit = True
+        self.root.destroy()
+
+    def obtener_taxi_id(self):
+        taxi_id = self.taxi_id_entry.get().strip()
+        self.taxi_id_entry.delete(0, tk.END)  # Limpiar el campo
+        return taxi_id
+
+    def comando_parar(self):
+        taxi_id = self.obtener_taxi_id()
+        if taxi_id in self.taxis_autenticados:
+            self.enviar_comando_taxi(taxi_id, 'STOP')
+            self.actualizar_mapa = True
+            self.dibujar_mapa()
+            self.dibujar_tabla_estados()
+        else:
+            messagebox.showerror("Error", f"Taxi {taxi_id} no autenticado.")
+
+    def comando_reanudar(self):
+        taxi_id = self.obtener_taxi_id()
+        if taxi_id in self.taxis_autenticados:
+            self.enviar_comando_taxi(taxi_id, 'RESUME')
+        else:
+            messagebox.showerror("Error", f"Taxi {taxi_id} no autenticado.")
+
+    def comando_ir_a_destino(self):
+        taxi_id = self.obtener_taxi_id()
+        if taxi_id in self.taxis_autenticados:
+            destino_id = simpledialog.askstring("Destino", "Ingrese el ID del destino (A, B, C):")
+            if destino_id and destino_id in self.localizaciones:
+                destino_coord = self.localizaciones[destino_id]
+                self.enviar_instrucciones_taxi(taxi_id, destino_coord)
+            else:
+                messagebox.showerror("Error", "Destino no encontrado.")
+        else:
+            messagebox.showerror("Error", f"Taxi {taxi_id} no autenticado.")
+
+    def comando_volver_base(self):
+        taxi_id = self.obtener_taxi_id()
+        if taxi_id in self.taxis_autenticados:
+            self.enviar_instrucciones_taxi(taxi_id, (1, 1))
+        else:
+            messagebox.showerror("Error", f"Taxi {taxi_id} no autenticado.")
      
     def dibujar_mapa(self):
         self.ventana.fill((255, 255, 255))  # Limpiar la pantalla con color blanco
@@ -649,6 +728,7 @@ class ECCentral:
             self.clientes_activos[cliente_id]['taxi_id'] = taxi_asignado
             self.enviar_mensaje_cliente(cliente_id, 'OK')
             self.enviar_taxi(taxi_asignado, cliente_id, destino_coord)
+            self.actualizar_mapa = True
         else:
             print(f"No se ha podido asignar taxi a cliente {cliente_id}")
             self.enviar_mensaje_cliente(cliente_id, 'KO')

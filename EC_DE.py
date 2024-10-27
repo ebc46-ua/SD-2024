@@ -220,19 +220,28 @@ class EC_DE:
 
     def mover_hacia_destino(self, destino, es_destino_final=False):
         while self.posicion != destino:
+            # Si el taxi ha sido detenido por comando, espera indefinidamente hasta recibir el comando de reanudación
             if self.stopped_by_command:
-                print("[EC_DE] Taxi detenido por comando.")
-                time.sleep(1)
+                if not self.stopped:  # Envía estado de detenido solo una vez
+                    self.enviar_estado('STOPPED')
+                    self.stopped = True
+                    print("[EC_DE] Taxi detenido por comando. Esperando reanudación...")
+
+                # Espera activa mientras `stopped_by_command` sea True
+                time.sleep(30)
                 continue
+
+            # Movimiento normal si no está detenido por comando
             if self.sensor_status == 'OK':
-                if self.stopped:
-                    # Enviar estado RESUMED a EC_Central
-                    self.enviar_estado('RESUMED')
+                if self.stopped:  # Si estaba detenido por una razón diferente, reanuda
+                    self.enviar_estado('BUSY')
                     self.stopped = False
-                # Mover hacia el destino
+
+                # Mover al siguiente paso hacia el destino
                 self.posicion = self.calcular_siguiente_paso(self.posicion, destino)
                 print(f"[EC_DE] Moviéndome a {self.posicion}")
-                # Notificar a EC_Central
+
+                # Envía la posición actual a EC_Central
                 data = f'POS#{self.posicion[0]}#{self.posicion[1]}'
                 lrc = self.calcular_lrc(data)
                 mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
@@ -242,16 +251,16 @@ class EC_DE:
                     print(f"[EC_DE] No se pudo enviar posición a EC_Central: {e}")
                     self.conectado_central = False
                     threading.Thread(target=self.reconectar_central, daemon=True).start()
-                time.sleep(1)  # Simular movimiento en tiempo real
+                time.sleep(1)  # Simula movimiento en tiempo real
             else:
+                # Manejo de otras contingencias si `sensor_status` no es 'OK'
                 if not self.stopped:
-                    # Enviar estado STOPPED a EC_Central
                     self.enviar_estado('STOPPED')
                     self.stopped = True
                 print("[EC_DE] Taxi detenido debido a una contingencia.")
                 time.sleep(1)
-        
-        # Si llega al destino, envía `ARRIVED` o `END` según corresponda
+
+        # Acciones al llegar al destino
         if es_destino_final:
             print("[EC_DE] Llegué al destino final.")
             self.state = 'END'
@@ -268,6 +277,12 @@ class EC_DE:
             print("[EC_DE] Esperando nuevas instrucciones de EC_Central.")
         else:
             print("[EC_DE] No se puede continuar sin conexión a EC_Central.")
+
+
+
+
+
+
 
 
 
