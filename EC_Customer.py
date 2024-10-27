@@ -62,27 +62,47 @@ class ECCustomer:
         else:
             print(f"[CLIENTE {self.cliente_id}] Una solicitud ya está en curso. Esperando respuesta.")
 
+
     def escuchar_respuestas(self):
         print(f"[CLIENTE {self.cliente_id}] Esperando respuestas de la CENTRAL...")
-        for mensaje in self.consumer:
-            respuesta = json.loads(mensaje.value.decode())
-            cliente_id_respuesta = respuesta.get('cliente_id')
-            estado = respuesta.get('estado')
+        start_time = time.time()  # Marcar el tiempo de inicio
+        timeout = 60  # Tiempo de espera en segundos (ajusta según sea necesario)
 
-            if cliente_id_respuesta == self.cliente_id:  # Comparación con cliente_id como string
-                if estado == 'OK':
-                    print(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi está en camino.")
-                elif estado == 'KO':
-                    print(f"[CLIENTE {cliente_id_respuesta}] Lo sentimos, no hay taxis disponibles en este momento.")
-                    self.solicitud_enviada = False  # Permite intentar enviar nuevamente
-                elif estado == 'COMPLETED':
-                    print(f"[CLIENTE {cliente_id_respuesta}] Su servicio ha finalizado.")
-                    print(f"[CLIENTE {cliente_id_respuesta}] Esperando 4 segundos para solicitar un nuevo servicio...")
-                    time.sleep(4)
-                    self.solicitud_enviada = False  # Permite enviar una nueva solicitud
-                    self.enviar_solicitud()  # Envía la siguiente solicitud si hay una pendiente
-                else:
-                    print(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
+        while True:
+            # Comprobar si se ha alcanzado el timeout
+            if time.time() - start_time > timeout:
+                print(f"[CLIENTE {self.cliente_id}] Tiempo de espera excedido, cerrando conexión.")
+                break  # Salir del bucle si se excede el tiempo de espera
+
+            try:
+                mensaje = next(self.consumer)  # Recibir un nuevo mensaje
+                respuesta = json.loads(mensaje.value.decode())
+                cliente_id_respuesta = respuesta.get('cliente_id')
+                estado = respuesta.get('estado')
+
+                if cliente_id_respuesta == self.cliente_id:
+                    if estado == 'OK':
+                        print(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi está en camino.")
+                    elif estado == 'KO':
+                        print(f"[CLIENTE {cliente_id_respuesta}] Lo sentimos, no hay taxis disponibles en este momento.")
+                        self.solicitud_enviada = False  # Permite intentar enviar nuevamente
+                    elif estado == 'RECOGIDO':
+                        print(f"[CLIENTE {cliente_id_respuesta}] Dirigiéndose a su destino.")
+                    elif estado == 'COMPLETED':
+                        print(f"[CLIENTE {cliente_id_respuesta}] Su servicio ha finalizado.")
+                        self.solicitud_enviada = False
+                        break  # Salir del bucle
+                    else:
+                        print(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
+
+            except StopIteration:
+                print(f"[CLIENTE {self.cliente_id}] No hay más mensajes disponibles.")
+                break  # No hay más mensajes, salir del bucle
+            except Exception as e:
+                print(f"[CLIENTE {self.cliente_id}] Ocurrió un error: {e}")
+                break  # Salir del bucle en caso de error
+
+
 
     def iniciar(self):
         if self.solicitudes_pendientes:

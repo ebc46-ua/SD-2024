@@ -377,7 +377,7 @@ class ECCentral:
         pygame.draw.line(self.screen, BLACK, (separator_x, y_start), (separator_x, y_start + (len(self.taxis_disponibles) + 1) * cell_height), 2)
 
         # Encabezados de la tabla de clientes
-        client_headers = ["ID Cliente", "Destino", "Estado"]
+        client_headers = ["ID Cliente", "Destino", "Estado", "ID Taxi"]  # Añadir ID Taxi como nuevo encabezado
         for i, header in enumerate(client_headers):
             pygame.draw.rect(self.screen, LIGHT_GRAY, (separator_x + 10 + i * cell_width, y_start, cell_width, cell_height))
             text_surface = self.font.render(header, True, BLACK)
@@ -386,7 +386,16 @@ class ECCentral:
         # Dibujar los datos de la tabla de clientes
         for j, (cliente_id, info) in enumerate(self.clientes_activos.items()):
             row_y = y_start + (j + 1) * cell_height
-            client_data = [cliente_id, info.get('destino', 'N/A'), info.get('estado', 'N/A')]
+            estado = info.get('estado', 'N/A')
+            taxi_id = info.get('taxi_id', 'Sin taxi')
+
+            # Formato del estado
+            if taxi_id != 'Sin taxi':
+                estado_formateado = f"{estado}. Taxi {taxi_id}"
+            else:
+                estado_formateado = f"{estado}. {taxi_id}"
+
+            client_data = [cliente_id, info.get('destino', 'N/A'), estado_formateado, taxi_id]
             for i, data in enumerate(client_data):
                 pygame.draw.rect(self.screen, WHITE, (separator_x + 10 + i * cell_width, row_y, cell_width, cell_height), 1)
                 text_surface = self.font.render(str(data), True, BLACK)
@@ -585,11 +594,12 @@ class ECCentral:
     #     }
     #     self.producer.send('respuesta_auth_taxi', json.dumps(mensaje).encode())
 
-    def agregar_cliente(self, cliente_id, destino):
+    def agregar_cliente(self, cliente_id, destino, taxi_id=None):
         # Agregar cliente al diccionario
         self.clientes_activos[cliente_id] = {
             'destino': self.localizaciones.get(destino),
-            'estado': 'OK'
+            'estado': 'OK',
+            'taxi_id': taxi_id or 'Sin taxi'  # Si no hay taxi asignado, se muestra "Sin taxi"
         }
 
         print(f"[CENTRAL] Cliente {cliente_id} agregado.")
@@ -615,7 +625,8 @@ class ECCentral:
                 self.localizaciones_clientes[cliente_id] = {
                     'origen': origen_cliente,  # Origen en formato (x, y)
                     'destino': destino_coord,   # Destino del cliente
-                    'estado' : 'OK'
+                    'estado': 'OK',
+                    'taxi_id': 'Sin taxi'       # Estado inicial sin taxi
                 }
                 self.agregar_cliente(cliente_id, destino)
             except ValueError:
@@ -634,6 +645,8 @@ class ECCentral:
         if taxi_asignado:
             print(f"[CENTRAL] Servicio aceptado para el cliente {cliente_id}. Enviando taxi {taxi_asignado}.")
             self.taxi_cliente[taxi_asignado] = cliente_id
+            # Actualiza el taxi_id del cliente en clientes_activos
+            self.clientes_activos[cliente_id]['taxi_id'] = taxi_asignado
             self.enviar_mensaje_cliente(cliente_id, 'OK')
             self.enviar_taxi(taxi_asignado, cliente_id, destino_coord)
         else:
