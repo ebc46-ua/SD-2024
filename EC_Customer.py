@@ -15,7 +15,7 @@ class EC_Customer:
         self.consumer = KafkaConsumer(
             'respuestas_clientes',
             bootstrap_servers=[self.broker_ip],
-            group_id='clientes',
+            group_id=f'cliente_{cliente_id}',  # Group ID único para cada cliente
             auto_offset_reset='earliest'
         )
         self.cliente_id = cliente_id
@@ -148,11 +148,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ejecutar EC_Customer con parámetros de conexión y autenticación.")
     parser.add_argument('broker_ip', type=str, help='IP del Broker de Kafka')
     parser.add_argument('cliente_id', type=str, help='ID del cliente (como letra)')
+    parser.add_argument('requests', type=str, help='Archivo requests')
 
     args = parser.parse_args()
     broker_ip = args.broker_ip
     cliente_id = args.cliente_id
+    requests_path = args.requests
 
-    requests_path = "EC_Requests.json"
     ec_customer = EC_Customer(broker_ip, requests_path, cliente_id)
     ec_customer.iniciar()

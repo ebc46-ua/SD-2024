@@ -48,10 +48,32 @@
         ]
     },
     {
-        "id": "taxi1",
-        "token": "token1",
+        "id": "7",
         "estado": "FREE",
-        "alias": "Taxitaxi1",
+        "posicion": [
+            1,
+            1
+        ]
+    },
+    {
+        "id": "8",
+        "estado": "FREE",
+        "posicion": [
+            1,
+            1
+        ]
+    },
+    {
+        "id": "9",
+        "estado": "FREE",
+        "posicion": [
+            1,
+            1
+        ]
+    },
+    {
+        "id": "10",
+        "estado": "FREE",
         "posicion": [
             1,
             1
