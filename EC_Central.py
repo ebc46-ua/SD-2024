@@ -14,7 +14,7 @@ from prettytable import PrettyTable
 import tkinter as tk
 from tkinter import messagebox, simpledialog
  
-class ECCentral:
+class EC_Central:
     def __init__(self, puerto_escucha, broker_ip, db_path, map_path):
         self.puerto_escucha = puerto_escucha
         self.broker_ip = broker_ip
@@ -1031,7 +1031,7 @@ if __name__ == "__main__":
     map_path = "EC_locations.json"  # Aquí habria que leerlo para evitar problemas
 
     # Instanciar la central
-    ec_central = ECCentral(puerto_escucha, broker_ip, db_path, map_path)
+    ec_central = EC_Central(puerto_escucha, broker_ip, db_path, map_path)
     
     # Conectar a la base de datos y cargar taxis
     if not ec_central.conectar_bd():

@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import json
 import time
-import os
+import threading
 from kafka import KafkaProducer, KafkaConsumer
 import argparse
+import tkinter as tk
+from tkinter import scrolledtext, messagebox
 
-class ECCustomer:
+class EC_Customer:
     def __init__(self, broker_ip, requests_path, cliente_id):
         self.broker_ip = broker_ip
         self.requests_path = requests_path
@@ -16,10 +18,10 @@ class ECCustomer:
             group_id='clientes',
             auto_offset_reset='earliest'
         )
-        self.cliente_id = cliente_id  # cliente_id es ahora un string
-        self.solicitudes_pendientes = []  # Lista de solicitudes pendientes por cliente
+        self.cliente_id = cliente_id
+        self.solicitudes_pendientes = []
         self.solicitud_enviada = False
-        self.cargar_solicitudes()
+        self.cargar_solicitudes()  # Cargar solicitudes antes de iniciar la GUI
 
     def cargar_solicitudes(self):
         try:
@@ -27,103 +29,133 @@ class ECCustomer:
                 requests_data = json.load(archivo_requests)
                 total_requests = requests_data['Requests']
 
-                # Mapeo de cliente_id (letra) a índice
-                # 'a' -> 0, 'b' -> 1, 'c' -> 2, etc.
                 index = ord(self.cliente_id) - ord('a')
-
-                # Verificar que el índice sea válido
                 if 0 <= index < len(total_requests):
                     solicitud = total_requests[index]
                     self.solicitudes_pendientes = [solicitud]
-                    print(f"[CLIENTE {self.cliente_id}] Solicitud asignada: {solicitud}")
+                    self.log(f"[CLIENTE {self.cliente_id}] Solicitud asignada: {solicitud}")
                 else:
-                    print(f"[CLIENTE {self.cliente_id}] No hay solicitudes disponibles para este cliente.")
+                    self.log(f"[CLIENTE {self.cliente_id}] No hay solicitudes disponibles para este cliente.")
                     self.solicitudes_pendientes = []
         except Exception as e:
-            print(f"Error al cargar solicitudes: {e}")
+            self.log(f"Error al cargar solicitudes: {e}")
 
     def enviar_solicitud(self):
-        if not self.solicitud_enviada:  # Solo envía si no hay una solicitud en curso
+        if not self.solicitud_enviada:
             if self.solicitudes_pendientes:
-                self.solicitud_enviada = True  # Marca que una solicitud está en curso
+                self.solicitud_enviada = True
                 request = self.solicitudes_pendientes.pop(0)
                 destino_id = request['Id']
                 origen_coord = request['Start']
                 mensaje = {
-                    'cliente_id': self.cliente_id,  # cliente_id sigue siendo un string
+                    'cliente_id': self.cliente_id,
                     'origen': origen_coord,
                     'destino': destino_id
                 }
                 self.producer.send('solicitudes', json.dumps(mensaje).encode())
-                print(f"[CLIENTE {self.cliente_id}] Solicitud enviada para destino {destino_id}")
+                self.log(f"[CLIENTE {self.cliente_id}] Solicitud enviada para destino {destino_id}")
             else:
-                print(f"[CLIENTE {self.cliente_id}] No hay más solicitudes pendientes.")
-                exit(0)
+                self.log(f"[CLIENTE {self.cliente_id}] No hay más solicitudes pendientes.")
         else:
-            print(f"[CLIENTE {self.cliente_id}] Una solicitud ya está en curso. Esperando respuesta.")
-
+            self.log(f"[CLIENTE {self.cliente_id}] Una solicitud ya está en curso. Esperando respuesta.")
 
     def escuchar_respuestas(self):
-        print(f"[CLIENTE {self.cliente_id}] Esperando respuestas de la CENTRAL...")
-        start_time = time.time()  # Marcar el tiempo de inicio
-        timeout = 60  # Tiempo de espera en segundos (ajusta según sea necesario)
+        self.log(f"[CLIENTE {self.cliente_id}] Esperando respuestas de la CENTRAL...")
+        start_time = time.time()
+        timeout = 60
 
         while True:
-            # Comprobar si se ha alcanzado el timeout
             if time.time() - start_time > timeout:
-                print(f"[CLIENTE {self.cliente_id}] Tiempo de espera excedido, cerrando conexión.")
-                break  # Salir del bucle si se excede el tiempo de espera
+                self.log(f"[CLIENTE {self.cliente_id}] Tiempo de espera excedido, cerrando conexión.")
+                break
 
             try:
-                mensaje = next(self.consumer)  # Recibir un nuevo mensaje
+                mensaje = next(self.consumer)
                 respuesta = json.loads(mensaje.value.decode())
                 cliente_id_respuesta = respuesta.get('cliente_id')
                 estado = respuesta.get('estado')
 
                 if cliente_id_respuesta == self.cliente_id:
                     if estado == 'OK':
-                        print(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi está en camino.")
+                        self.log(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi está en camino.")
                     elif estado == 'KO':
-                        print(f"[CLIENTE {cliente_id_respuesta}] Lo sentimos, no hay taxis disponibles en este momento.")
-                        self.solicitud_enviada = False  # Permite intentar enviar nuevamente
-                    elif estado == 'RECOGIDO':
-                        print(f"[CLIENTE {cliente_id_respuesta}] Dirigiéndose a su destino.")
-                    elif estado == 'COMPLETED':
-                        print(f"[CLIENTE {cliente_id_respuesta}] Su servicio ha finalizado.")
+                        self.log(f"[CLIENTE {cliente_id_respuesta}] Lo sentimos, no hay taxis disponibles en este momento.")
                         self.solicitud_enviada = False
-                        break  # Salir del bucle
+                    elif estado == 'RECOGIDO':
+                        self.log(f"[CLIENTE {cliente_id_respuesta}] Dirigiéndose a su destino.")
+                    elif estado == 'COMPLETED':
+                        self.log(f"[CLIENTE {cliente_id_respuesta}] Su servicio ha finalizado.")
+                        self.solicitud_enviada = False
+                        break
                     else:
-                        print(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
-
+                        self.log(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
             except StopIteration:
-                print(f"[CLIENTE {self.cliente_id}] No hay más mensajes disponibles.")
-                break  # No hay más mensajes, salir del bucle
+                self.log(f"[CLIENTE {self.cliente_id}] No hay más mensajes disponibles.")
+                break
             except Exception as e:
-                print(f"[CLIENTE {self.cliente_id}] Ocurrió un error: {e}")
-                break  # Salir del bucle en caso de error
-
-
+                self.log(f"[CLIENTE {self.cliente_id}] Ocurrió un error: {e}")
+                break
 
     def iniciar(self):
-        if self.solicitudes_pendientes:
+        # Inicia la interfaz gráfica en el hilo principal
+        self.init_gui()
+
+        # Inicia el proceso de Kafka en un hilo separado
+        hilo_kafka = threading.Thread(target=self.escuchar_respuestas, daemon=True)
+        hilo_kafka.start()
+        
+        # Ejecuta el bucle de la interfaz gráfica
+        self.root.mainloop()
+
+    def init_gui(self):
+        self.root = tk.Tk()
+        self.root.title(f"Cliente {self.cliente_id}")
+        
+        self.text_area = scrolledtext.ScrolledText(self.root, width=60, height=20)
+        self.text_area.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
+        
+        self.label_destino = tk.Label(self.root, text="Ingrese destino ID:")
+        self.label_destino.grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        
+        self.entry_destino = tk.Entry(self.root, width=20)
+        self.entry_destino.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        
+        self.button_solicitar = tk.Button(self.root, text="Solicitar Taxi", command=self.enviar_solicitud_gui)
+        self.button_solicitar.grid(row=2, column=0, columnspan=2, pady=10)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def enviar_solicitud_gui(self):
+        destino_id = self.entry_destino.get()
+        if destino_id:
+            self.solicitudes_pendientes.append({"Id": destino_id, "Start": [0, 0]})
             self.enviar_solicitud()
-            self.escuchar_respuestas()
         else:
-            print(f"[CLIENTE {self.cliente_id}] No hay solicitudes para procesar.")
+            messagebox.showwarning("Advertencia", "Por favor, ingrese un destino válido.")
+
+    def log(self, message):
+        try:
+            if hasattr(self, 'text_area'):
+                self.text_area.insert(tk.END, message + "\n")
+                self.text_area.see(tk.END)
+            else:
+                print(message)
+        except Exception as e:
+            print(f"Error en log: {e}")
+
+    def on_closing(self):
+        self.root.quit()
+        self.root.destroy()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ejecutar EC_Customer con parámetros de conexión y autenticación.")
-
-    parser.add_argument('broker_ip', type=str, help='IP del Broker de Kafka')  # Broker IP y Puerto
+    parser.add_argument('broker_ip', type=str, help='IP del Broker de Kafka')
     parser.add_argument('cliente_id', type=str, help='ID del cliente (como letra)')
 
     args = parser.parse_args()
-
     broker_ip = args.broker_ip
-    cliente_id = args.cliente_id 
+    cliente_id = args.cliente_id
 
     requests_path = "EC_Requests.json"
-
-    ec_customer = ECCustomer(broker_ip, requests_path, cliente_id)
+    ec_customer = EC_Customer(broker_ip, requests_path, cliente_id)
     ec_customer.iniciar()
-
