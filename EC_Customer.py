@@ -28,24 +28,25 @@ class EC_Customer:
             with open(self.requests_path, 'r') as archivo_requests:
                 requests_data = json.load(archivo_requests)
                 total_requests = requests_data['Requests']
+                
+                # Cargamos todas las solicitudes en lugar de solo una
+                self.solicitudes_pendientes = total_requests  # Cargamos todas las solicitudes
+                self.log(f"[CLIENTE {self.cliente_id}] Solicitudes cargadas: {self.solicitudes_pendientes}")
 
-                index = ord(self.cliente_id) - ord('a')
-                if 0 <= index < len(total_requests):
-                    solicitud = total_requests[index]
-                    self.solicitudes_pendientes = [solicitud]
-                    self.log(f"[CLIENTE {self.cliente_id}] Solicitud asignada: {solicitud}")
-                    self.enviar_solicitud()  # Enviar la solicitud automáticamente
+                # Enviar la primera solicitud automáticamente
+                if self.solicitudes_pendientes:
+                    self.enviar_solicitud()  # Enviar la primera solicitud automáticamente
                 else:
-                    self.log(f"[CLIENTE {self.cliente_id}] No hay solicitudes disponibles para este cliente.")
-                    self.solicitudes_pendientes = []
+                    self.log(f"[CLIENTE {self.cliente_id}] No hay solicitudes disponibles.")
         except Exception as e:
             self.log(f"Error al cargar solicitudes: {e}")
+
 
     def enviar_solicitud(self):
         if not self.solicitud_enviada:
             if self.solicitudes_pendientes:
                 self.solicitud_enviada = True
-                request = self.solicitudes_pendientes.pop(0)
+                request = self.solicitudes_pendientes.pop(0)  # Carga la primera solicitud
                 destino_id = request['Id']
                 origen_coord = request['Start']
                 mensaje = {
@@ -60,10 +61,11 @@ class EC_Customer:
         else:
             self.log(f"[CLIENTE {self.cliente_id}] Una solicitud ya está en curso. Esperando respuesta.")
 
+
     def escuchar_respuestas(self):
         self.log(f"[CLIENTE {self.cliente_id}] Esperando respuestas de la CENTRAL...")
         start_time = time.time()
-        timeout = 60
+        timeout = 120
 
         while True:
             if time.time() - start_time > timeout:
@@ -87,7 +89,12 @@ class EC_Customer:
                     elif estado == 'COMPLETED':
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Su servicio ha finalizado.")
                         self.solicitud_enviada = False
-                        break
+                        self.log(f"[CLIENTE {cliente_id_respuesta}] Esperando 4 segundos antes de nueva solicitud.")
+                        # Esperar 4 segundos antes de enviar la siguiente solicitud
+                        time.sleep(4)
+
+                        self.enviar_solicitud()  # Enviar la siguiente solicitud si hay
+
                     else:
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
             except StopIteration:
