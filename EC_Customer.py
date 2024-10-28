@@ -34,6 +34,7 @@ class EC_Customer:
                     solicitud = total_requests[index]
                     self.solicitudes_pendientes = [solicitud]
                     self.log(f"[CLIENTE {self.cliente_id}] Solicitud asignada: {solicitud}")
+                    self.enviar_solicitud()  # Enviar la solicitud automáticamente
                 else:
                     self.log(f"[CLIENTE {self.cliente_id}] No hay solicitudes disponibles para este cliente.")
                     self.solicitudes_pendientes = []
@@ -113,25 +114,14 @@ class EC_Customer:
         
         self.text_area = scrolledtext.ScrolledText(self.root, width=60, height=20)
         self.text_area.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
-        
-        self.label_destino = tk.Label(self.root, text="Ingrese destino ID:")
+
+        # Eliminar la entrada para el destino
+        self.label_destino = tk.Label(self.root, text="Esperando respuestas...")
         self.label_destino.grid(row=1, column=0, padx=5, pady=5, sticky="e")
         
-        self.entry_destino = tk.Entry(self.root, width=20)
-        self.entry_destino.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-        
-        self.button_solicitar = tk.Button(self.root, text="Solicitar Taxi", command=self.enviar_solicitud_gui)
+        # Eliminar el botón de solicitud
+        self.button_solicitar = tk.Button(self.root, text="Cerrar", command=self.on_closing)
         self.button_solicitar.grid(row=2, column=0, columnspan=2, pady=10)
-
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-    def enviar_solicitud_gui(self):
-        destino_id = self.entry_destino.get()
-        if destino_id:
-            self.solicitudes_pendientes.append({"Id": destino_id, "Start": [0, 0]})
-            self.enviar_solicitud()
-        else:
-            messagebox.showwarning("Advertencia", "Por favor, ingrese un destino válido.")
 
     def log(self, message):
         try:
