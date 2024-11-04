@@ -173,24 +173,22 @@ class EC_Central:
                                 self.enviar_mapa_actualizado()
 
                             elif campos[0].strip() == 'STATUS':
-                                estado = campos[1].strip()
-                                with self.lock:
-                                    if estado == 'ARRIVED':
-                                        self.procesar_arrived(taxi_id, cliente_socket)
-                                    elif estado == 'STOPPED':
+                                if campos[1].strip() == 'ARRIVED':
+                                    self.procesar_arrived(taxi_id, cliente_socket)
+                                elif campos[1].strip() == 'STOPPED':
+                                    with self.lock:
                                         self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
                                         self.dibujar_mapa()
                                         self.dibujar_tabla_estados()
                                         print(f"[CENTRAL] Estado de taxi {taxi_id} actualizado a 'stopped'.")
-                                    elif estado == 'CONTINGENCY':
-                                        self.taxis_autenticados[taxi_id]['estado'] = 'contingency'
-                                        self.dibujar_mapa()
-                                        self.dibujar_tabla_estados()
-                                        print(f"[CENTRAL] Estado de taxi {taxi_id} actualizado a 'contingency'.")
-                                        # Aquí se puede agregar lógica para manejar la contingencia
-                                        self.manejar_contingencia(taxi_id)  # Nueva función para manejar la contingencia
+                                    self.enviar_respuesta(cliente_socket, 'ACK')
+                            elif campos[1].strip() == 'CONTINGENCY':
+                                with self.lock:
+                                    self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
+                                    self.dibujar_mapa()
+                                    self.dibujar_tabla_estados()
+                                    print(f"[CENTRAL] Estado de taxi {taxi_id} actualizado a 'contingency'.")
                                 self.enviar_respuesta(cliente_socket, 'ACK')
-
                             else:
                                 self.enviar_respuesta(cliente_socket, 'NACK')
                         else:
@@ -205,14 +203,6 @@ class EC_Central:
             threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
 
 
-    def manejar_contingencia(self, taxi_id):
-        with self.lock:
-            if taxi_id in self.taxis_autenticados:
-                taxi_info = self.taxis_autenticados[taxi_id]
-                # Lógica para manejar la contingencia, por ejemplo, notificar a un servicio de emergencia
-                print(f"[CENTRAL] Manejo de contingencia para taxi {taxi_id}. Estado actual: {taxi_info['estado']}.")
-                # Aquí puedes implementar acciones como reiniciar el taxi o notificar a los clientes.
-                # También podrías intentar reconectar o enviar mensajes de alerta según sea necesario.
 
 
 

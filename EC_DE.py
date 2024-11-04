@@ -227,7 +227,7 @@ class EC_DE:
                     self.stopped = True
                     print("[EC_DE] Taxi detenido por comando. Esperando reanudación...")
 
-                # Espera activa mientras `stopped_by_command` sea True
+                # Espera activa mientras stopped_by_command sea True
                 time.sleep(30)
                 continue
 
@@ -253,7 +253,7 @@ class EC_DE:
                     threading.Thread(target=self.reconectar_central, daemon=True).start()
                 time.sleep(1)  # Simula movimiento en tiempo real
             else:
-                # Manejo de otras contingencias si `sensor_status` no es 'OK'
+                # Manejo de otras contingencias si sensor_status no es 'OK'
                 if not self.stopped:
                     self.enviar_estado('STOPPED')
                     self.stopped = True

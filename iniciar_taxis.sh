@@ -5,7 +5,7 @@ NUM_TAXIS=3
 # Puerto base
 BASE_PORT=8888
 # Puerto escucha Central
-PUERTO_CENTRAL='2195'
+PUERTO_CENTRAL='2196'
 IP_CENTRAL='localhost'
 
 IP_PROPIA='localhost'
