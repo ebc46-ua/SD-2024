@@ -25,7 +25,7 @@ class EC_Central:
         self.clientes_activos = {}
         self.taxi_cliente = {}  # Diccionario para asociar taxi_id con cliente_id
         self.taxis_autenticados = {}
-        self.sockets_taxis = {}  # Almacenar los sockets de los taxis
+        self.sockets_taxis = {}
         self.lock = threading.Lock()  # Lock para proteger acceso a datos compartidos
         self.quit = False  # Flag para indicar salida del programa
         self.actualizar_mapa = False # Flag para indicar actualización del mapa
@@ -39,8 +39,8 @@ class EC_Central:
 
         
         pygame.init()
-        self.ancho_ventana = 900  # Ancho de la ventana
-        self.alto_ventana = 400   # Alto de la ventana
+        self.ancho_ventana = 900 
+        self.alto_ventana = 400  
         self.tamaño_celda = 20    # Tamaño de cada celda en píxeles
         self.ventana = pygame.display.set_mode((self.ancho_ventana, self.alto_ventana))
         pygame.display.set_caption("Mapa de Taxis")
@@ -112,7 +112,7 @@ class EC_Central:
     def verificar_lrc(self, data, lrc):
         # Implementar la verificación del LRC
         calculated_lrc = self.calcular_lrc(data)
-        return str(calculated_lrc) == lrc.strip()  # Compara correctamente
+        return str(calculated_lrc) == lrc.strip() 
 
     def calcular_lrc(self, data):
         lrc = 0
@@ -217,7 +217,7 @@ class EC_Central:
                 # Comprobar si el taxi ha llegado al origen o al destino
                 if estado_cliente == 'OK':  # Llegó al origen, cliente está en espera de recogida
                     print(f"[CENTRAL] Taxi {taxi_id} ha llegado al origen para recoger al cliente {cliente_id}.")
-                    self.localizaciones_clientes[cliente_id]['estado'] = 'RECOGIDO'  # Cambiamos el estado a "RECOGIDO"
+                    self.localizaciones_clientes[cliente_id]['estado'] = 'RECOGIDO' 
                     print(f"[DEBUG] Estado del cliente {cliente_id} cambiado a {self.localizaciones_clientes[cliente_id]['estado']}")
                     self.actualizar_mapa = True
                     self.actualizar_tabla = True
@@ -231,7 +231,7 @@ class EC_Central:
                     mensaje = f"<STX>{data}<ETX><LRC>{lrc}"
                     cliente_socket.send(mensaje.encode())
 
-                elif estado_cliente == 'RECOGIDO':  # Llegó al destino
+                elif estado_cliente == 'RECOGIDO': 
                     print(f"[CENTRAL] Taxi {taxi_id} ha llegado al destino final con el cliente {cliente_id}.")
                     # Actualizar estados del taxi y cliente
                     self.taxis_autenticados[taxi_id]['estado'] = 'FREE'
@@ -302,9 +302,9 @@ class EC_Central:
                 self.dibujar_mapa()
                 self.dibujar_tabla_estados()
                 pygame.display.flip()
-                self.actualizar_mapa = False  # Reiniciar el flag de actualización
+                self.actualizar_mapa = False 
 
-            clock.tick(60)  # Limitar a 60 FPS
+            clock.tick(60)
     
     def setup_command_interface(self):
         self.root = tk.Tk()
@@ -338,7 +338,7 @@ class EC_Central:
 
     def obtener_taxi_id(self):
         taxi_id = self.taxi_id_entry.get().strip()
-        self.taxi_id_entry.delete(0, tk.END)  # Limpiar el campo
+        self.taxi_id_entry.delete(0, tk.END)
         return taxi_id
 
     def comando_parar(self):
@@ -378,7 +378,12 @@ class EC_Central:
             messagebox.showerror("Error", f"Taxi {taxi_id} no autenticado.")
      
     def dibujar_mapa(self):
-        self.ventana.fill((255, 255, 255))  # Limpiar la pantalla con color blanco
+        WHITE = (255, 255, 255)
+        BLUE = (23, 196, 247)
+        GREEN = (0, 255, 0)
+        RED = (255, 0, 0)
+        YELLOW = (255, 255, 0)
+        self.ventana.fill(WHITE)  # Limpiar la pantalla con color blanco
 
         # Dibujar la cuadrícula
         for x in range(0, 400, self.tamaño_celda):
@@ -390,7 +395,7 @@ class EC_Central:
         for id_localizacion, coord in self.localizaciones.items():
             x, y = coord
             rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-            pygame.draw.rect(self.ventana, (23, 196, 247), rect)  # Color azul para las localizaciones
+            pygame.draw.rect(self.ventana, BLUE, rect)  # Color azul para las localizaciones
             img = self.font.render(id_localizacion, True, (0, 0, 0))
             self.ventana.blit(img, (x * self.tamaño_celda + 4, y * self.tamaño_celda + 3))
 
@@ -399,7 +404,7 @@ class EC_Central:
             for taxi_id, taxi_info in self.taxis_autenticados.items():
                 x, y = taxi_info['posicion']
                 rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-                color_taxi = (0, 255, 0) if taxi_info['estado'] == 'RUN' or taxi_info['estado'] == 'BUSY' else (255, 0, 0)
+                color_taxi = GREEN if taxi_info['estado'] == 'RUN' or taxi_info['estado'] == 'BUSY' else RED
                 pygame.draw.rect(self.ventana, color_taxi, rect)
                 img = self.font.render(str(taxi_id), True, (0, 0, 0))
                 self.ventana.blit(img, (x * self.tamaño_celda + 4, y * self.tamaño_celda + 3))
@@ -409,23 +414,22 @@ class EC_Central:
             cliente_info = self.localizaciones_clientes[cliente_id]
             estado = info_cliente.get('estado', 'N/A')  
             print(cliente_info['estado'] + '\n')
-            if cliente_info['estado'] != 'RECOGIDO':  # Solo dibujar si el cliente no ha sido recogido
+            if cliente_info['estado'] != 'RECOGIDO': 
                 origen = info_cliente.get('origen')
                 if isinstance(origen, tuple) and len(origen) == 2:
                     x, y = origen
                     rect = pygame.Rect(x * self.tamaño_celda, y * self.tamaño_celda, self.tamaño_celda, self.tamaño_celda)
-                    pygame.draw.rect(self.ventana, (255, 255, 0), rect)  
+                    pygame.draw.rect(self.ventana, YELLOW, rect)  
                     img = self.font.render(f"{cliente_id}", True, (0, 0, 0))
                     self.ventana.blit(img, (x * self.tamaño_celda + 4, y * self.tamaño_celda + 3))
                 else:
                     print(f"[ERROR] Cliente {cliente_id} tiene un origen no válido: {origen}")
 
-        pygame.display.flip()  # Actualizar la pantalla
+        pygame.display.flip() 
 
 
 
     def dibujar_tabla_estados(self):
-        # Colores
         WHITE = (255, 255, 255)
         BLACK = (0, 0, 0)
         LIGHT_GRAY = (200, 200, 200)
@@ -440,7 +444,7 @@ class EC_Central:
         header_text = "*** EASY CAB Release 1 ***"
         text_surface = self.font.render(header_text, True, BLACK)
         self.screen.blit(text_surface, (x_start + cell_width, y_start))
-        y_start += cell_height  # Mover hacia abajo para iniciar las tablas
+        y_start += cell_height
 
         # Encabezados de la tabla de taxis
         headers = ["ID Taxi", "Destino", "Estado"]
@@ -460,7 +464,7 @@ class EC_Central:
                 self.screen.blit(text_surface, (x_start + i * cell_width + 10, row_y + 5))
 
         # Separación vertical entre la tabla de taxis y la de clientes
-        separator_x = x_start + 3 * cell_width + 10  # Espacio para tres columnas de taxis
+        separator_x = x_start + 3 * cell_width + 10 
         pygame.draw.line(self.screen, BLACK, (separator_x, y_start), (separator_x, y_start + (len(self.taxis_disponibles) + 1) * cell_height), 2)
 
         # Encabezados de la tabla de clientes
@@ -488,7 +492,7 @@ class EC_Central:
                 text_surface = self.font.render(str(data), True, BLACK)
                 self.screen.blit(text_surface, (separator_x + 10 + i * cell_width + 10, row_y + 5))
 
-        pygame.display.flip()  # Actualizar pantalla
+        pygame.display.flip() 
 
 
 
@@ -500,12 +504,6 @@ class EC_Central:
             del self.clientes_activos[cliente_id]
         self.dibujar_mapa()  # Actualiza el mapa después de eliminar el cliente
         self.dibujar_tabla_estados()
-
-
-    # def actualizar_pygame(self):
-    #     while True:
-            
-    #         #time.sleep(0.1)  # Pequeña pausa para no saturar la CPU
             
             
     def cargar_localizaciones(self):
@@ -646,7 +644,6 @@ class EC_Central:
         self.taxis_autenticados[datos_taxi['id']] = taxi_autenticado
         self.taxis_disponibles[datos_taxi['id']] = taxi_autenticado
 
-        # Llamar a dibujar_mapa() para mostrar el taxi recién autenticado
         self.dibujar_mapa()
         self.actualizar_tabla = True
         self.dibujar_tabla_estados()
@@ -656,8 +653,7 @@ class EC_Central:
         if datos_taxi['id'] in self.taxi_cliente:
             print(f"[CENTRAL] Taxi {datos_taxi['id']} reconectado y restaurando servicio al cliente.")
         
-        # Actualizar el mapa y enviar a todos los taxis y clientes conectados
-        self.enviar_mapa_actualizado()  # << Esta es la línea añadida para actualizar el mapa
+        self.enviar_mapa_actualizado() 
 
         return True
 
@@ -667,7 +663,7 @@ class EC_Central:
         self.clientes_activos[cliente_id] = {
             'destino': self.localizaciones.get(destino),
             'estado': 'OK',
-            'taxi_id': taxi_id or 'Sin taxi'  # Si no hay taxi asignado, se muestra "Sin taxi"
+            'taxi_id': taxi_id or 'Sin taxi'
         }
 
         print(f"[CENTRAL] Cliente {cliente_id} agregado.")
@@ -688,13 +684,13 @@ class EC_Central:
         origen_cliente = peticion.get('origen')
         if isinstance(origen_cliente, str):
             try:
-                x, y = map(int, origen_cliente.split(','))  # Divide y convierte a enteros
+                x, y = map(int, origen_cliente.split(','))
                 origen_cliente = (x, y)
                 self.localizaciones_clientes[cliente_id] = {
                     'origen': origen_cliente,  # Origen en formato (x, y)
-                    'destino': destino_coord,   # Destino del cliente
+                    'destino': destino_coord,  
                     'estado': 'OK',
-                    'taxi_id': 'Sin taxi'       # Estado inicial sin taxi
+                    'taxi_id': 'Sin taxi'      
                 }
                 self.agregar_cliente(cliente_id, destino)
             except ValueError:
@@ -791,7 +787,7 @@ class EC_Central:
     
     def enviar_taxi(self, taxi_id, cliente_id, destino):
         taxi_info = self.taxis_autenticados.get(taxi_id)
-        cliente_origen = self.localizaciones_clientes[cliente_id]['origen']  # Origen del cliente
+        cliente_origen = self.localizaciones_clientes[cliente_id]['origen']
 
         if taxi_info:
             print(f"Taxi {taxi_id} se dirige a recoger al cliente {cliente_id} en {cliente_origen}.")
@@ -808,7 +804,6 @@ class EC_Central:
             print(f"Taxi {taxi_id} llevando al cliente {cliente_id} a {destino}.")
             self.enviar_instrucciones_taxi(taxi_id, destino)
 
-            # Aquí no eliminamos al cliente, solo actualizamos su estado
         else:
             print(f"[CENTRAL] No se pudo enviar taxi {taxi_id} al cliente {cliente_id}.")
 
@@ -817,7 +812,6 @@ class EC_Central:
 
 
     def calcular_siguiente_paso(self, posicion_actual, destino):
-        """Calcula el siguiente paso en el trayecto del taxi hacia su destino"""
         x_actual, y_actual = posicion_actual
         x_dest, y_dest = destino
 
@@ -853,7 +847,7 @@ class EC_Central:
         try:
             with open(archivo_ruta, 'a') as archivo:
                 json.dump(ruta, archivo)
-                archivo.write("\n")  # Nueva línea para cada ruta
+                archivo.write("\n")
             print(f"[CENTRAL] Ruta actualizada en {archivo_ruta} para taxi {taxi_id}.")
         except Exception as e:
             print(f"[CENTRAL] Error actualizando la ruta de taxi {taxi_id}: {e}")
@@ -900,23 +894,6 @@ class EC_Central:
                     peticion = json.loads(message.value.decode())
                     self.procesar_peticion_cliente(peticion)
                     
-    def procesar_solicitudes(self):
-        cliente_id = 1  
-        for destino_id in self.solicitudes:
-            # Convertir el ID del destino a coordenadas
-            destino_coord = self.localizaciones.get(destino_id)
-            if destino_coord:
-                print(f"Procesando solicitud del cliente {cliente_id} para destino {destino_id} en coordenadas {destino_coord}")
-                peticion = {
-                    'cliente_id': cliente_id,
-                    'destino': destino_coord
-                }
-                self.procesar_peticion_cliente(peticion)
-                cliente_id += 1
-                time.sleep(1)  # Simular tiempo entre solicitudes
-            else:
-                print(f"Destino {destino_id} no encontrado en las localizaciones.")
-
     
     def conectar_bd(self):
         if os.path.exists(self.db_path):
@@ -951,12 +928,11 @@ if __name__ == "__main__":
     broker_ip = args.broker_ip
     db_path = args.db_path
 
-    map_path = "EC_locations.json"  # Aquí habria que leerlo para evitar problemas
+    map_path = "EC_locations.json" 
 
     # Instanciar la central
     ec_central = EC_Central(puerto_escucha, broker_ip, db_path, map_path)
     
-    # Conectar a la base de datos y cargar taxis
     if not ec_central.conectar_bd():
         print("No se pudo conectar a la base de datos. Finalizando.")
         exit(1)
