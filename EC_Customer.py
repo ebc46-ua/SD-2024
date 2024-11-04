@@ -46,7 +46,7 @@ class EC_Customer:
         if not self.solicitud_enviada:
             if self.solicitudes_pendientes:
                 self.solicitud_enviada = True
-                request = self.solicitudes_pendientes.pop(0)  # Carga la primera solicitud
+                request = self.solicitudes_pendientes.pop(0)
                 destino_id = request['Id']
                 origen_coord = request['Start']
                 mensaje = {
@@ -54,13 +54,16 @@ class EC_Customer:
                     'origen': origen_coord,
                     'destino': destino_id
                 }
-                self.producer.send('solicitudes', json.dumps(mensaje).encode())
-                self.log(f"[CLIENTE {self.cliente_id}] Solicitud enviada para destino {destino_id}")
+                try:
+                    self.producer.send('solicitudes', json.dumps(mensaje).encode()).get(timeout=10)
+                    self.log(f"[CLIENTE {self.cliente_id}] Solicitud enviada para destino {destino_id}")
+                except Exception as e:
+                    self.log(f"[CLIENTE {self.cliente_id}] Error al enviar solicitud: {e}")
+                    self.solicitud_enviada = False
             else:
                 self.log(f"[CLIENTE {self.cliente_id}] No hay más solicitudes pendientes.")
         else:
             self.log(f"[CLIENTE {self.cliente_id}] Una solicitud ya está en curso. Esperando respuesta.")
-
 
     def escuchar_respuestas(self):
         self.log(f"[CLIENTE {self.cliente_id}] Esperando respuestas de la CENTRAL...")
@@ -79,6 +82,7 @@ class EC_Customer:
                 estado = respuesta.get('estado')
 
                 if cliente_id_respuesta == self.cliente_id:
+                    start_time = time.time()  # Reiniciar el tiempo de espera al recibir respuesta válida
                     if estado == 'OK':
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Un taxi está en camino.")
                     elif estado == 'KO':
@@ -90,11 +94,8 @@ class EC_Customer:
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Su servicio ha finalizado.")
                         self.solicitud_enviada = False
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Esperando 4 segundos antes de nueva solicitud.")
-                        # Esperar 4 segundos antes de enviar la siguiente solicitud
                         time.sleep(4)
-
                         self.enviar_solicitud()  # Enviar la siguiente solicitud si hay
-
                     else:
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
             except StopIteration:
@@ -103,6 +104,7 @@ class EC_Customer:
             except Exception as e:
                 self.log(f"[CLIENTE {self.cliente_id}] Ocurrió un error: {e}")
                 break
+
 
     def iniciar(self):
         # Inicia la interfaz gráfica en el hilo principal

@@ -1,0 +1,22 @@
+Copiar la carpeta del proyecto al escritorio
+
+cd Escritorio/SD-2024
+
+python3 -m venv venv
+
+source venv/bin/activate
+
+pip install --break-system-packages --no-input git+https://github.com/dpkp/kafka-python.git
+
+pip install pygame
+
+pip install prettytable
+
+Descargar Binario página de kafka https://kafka.apache.org/downloads
+
+cd Descargas/kafka_2.12-3.8.1
+
+En pestañas separadas:
+bin/zookeeper-server-start.sh config/zookeeper.properties
+
+bin/kafka-server-start.sh config/server.properties

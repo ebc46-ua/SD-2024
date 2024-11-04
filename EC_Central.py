@@ -138,9 +138,6 @@ class EC_Central:
             except Exception as e:
                 print(f"[CENTRAL] Error al enviar mapa actualizado: {e}")
 
-    
-
-
     def gestionar_taxi(self, cliente_socket, taxi_id):
         try:
             buffer = ""  
@@ -176,15 +173,24 @@ class EC_Central:
                                 self.enviar_mapa_actualizado()
 
                             elif campos[0].strip() == 'STATUS':
-                                if campos[1].strip() == 'ARRIVED':
-                                    self.procesar_arrived(taxi_id, cliente_socket)
-                                elif campos[1].strip() == 'STOPPED':
-                                    with self.lock:
+                                estado = campos[1].strip()
+                                with self.lock:
+                                    if estado == 'ARRIVED':
+                                        self.procesar_arrived(taxi_id, cliente_socket)
+                                    elif estado == 'STOPPED':
                                         self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
                                         self.dibujar_mapa()
                                         self.dibujar_tabla_estados()
                                         print(f"[CENTRAL] Estado de taxi {taxi_id} actualizado a 'stopped'.")
-                                    self.enviar_respuesta(cliente_socket, 'ACK')
+                                    elif estado == 'CONTINGENCY':
+                                        self.taxis_autenticados[taxi_id]['estado'] = 'contingency'
+                                        self.dibujar_mapa()
+                                        self.dibujar_tabla_estados()
+                                        print(f"[CENTRAL] Estado de taxi {taxi_id} actualizado a 'contingency'.")
+                                        # Aquí se puede agregar lógica para manejar la contingencia
+                                        self.manejar_contingencia(taxi_id)  # Nueva función para manejar la contingencia
+                                self.enviar_respuesta(cliente_socket, 'ACK')
+
                             else:
                                 self.enviar_respuesta(cliente_socket, 'NACK')
                         else:
@@ -197,6 +203,18 @@ class EC_Central:
             print(f"[CENTRAL] Conexión con taxi {taxi_id} cerrada: {e}")
             cliente_socket.close()
             threading.Thread(target=self.esperar_reconexion_taxi, args=(taxi_id,), daemon=True).start()
+
+
+    def manejar_contingencia(self, taxi_id):
+        with self.lock:
+            if taxi_id in self.taxis_autenticados:
+                taxi_info = self.taxis_autenticados[taxi_id]
+                # Lógica para manejar la contingencia, por ejemplo, notificar a un servicio de emergencia
+                print(f"[CENTRAL] Manejo de contingencia para taxi {taxi_id}. Estado actual: {taxi_info['estado']}.")
+                # Aquí puedes implementar acciones como reiniciar el taxi o notificar a los clientes.
+                # También podrías intentar reconectar o enviar mensajes de alerta según sea necesario.
+
+
 
     def procesar_arrived(self, taxi_id, cliente_socket):
         cliente_id = self.taxi_cliente.get(taxi_id)
@@ -442,7 +460,7 @@ class EC_Central:
             self.screen.blit(text_surface, (x_start + i * cell_width + 10, y_start + 5))
 
         # Dibujar los datos de la tabla de taxis
-        for j, (taxi_id, info) in enumerate(self.taxis_disponibles.items()):
+        for j, (taxi_id, info) in enumerate(self.taxis_autenticados.items()):
             row_y = y_start + (j + 1) * cell_height
             destino = info.get('destino', "No asignado")
             taxi_data = [taxi_id, destino, info['estado']]
@@ -654,25 +672,6 @@ class EC_Central:
         return True
 
 
-
-
-    # def procesar_autenticacion_taxi(self, autenticacion):
-    #     # Procesa la autenticación de taxis
-    #     if self.autentifica(autenticacion):
-    #         print(f"Taxi {autenticacion['id']} autenticado con éxito.")
-    #         self.enviar_mensaje_autenticacion(autenticacion['id'], 'OK')
-    #     else:
-    #         print(f"Taxi {autenticacion['id']} falló en la autenticación.")
-    #         self.enviar_mensaje_autenticacion(autenticacion['id'], 'KO')
-
-    # def enviar_mensaje_autenticacion(self, taxi_id, estado):
-    #     # Envía el estado de autenticación al taxi
-    #     mensaje = {
-    #         'taxi_id': taxi_id,
-    #         'estado': estado
-    #     }
-    #     self.producer.send('respuesta_auth_taxi', json.dumps(mensaje).encode())
-
     def agregar_cliente(self, cliente_id, destino, taxi_id=None):
         # Agregar cliente al diccionario
         self.clientes_activos[cliente_id] = {
@@ -843,72 +842,6 @@ class EC_Central:
             y_actual -= 1
 
         return x_actual, y_actual
-
-    # def procesar_mensajes_sensores(self):
-    #     # Procesar mensajes recibidos de los sensores de los taxis
-    #     for mensaje in self.consumer_sensores:
-    #         datos_sensor = json.loads(mensaje.value.decode())
-    #         taxi_id = datos_sensor.get('taxi_id')
-    #         estado = datos_sensor.get('estado')
-            
-    #         if taxi_id in self.taxis_autenticados:
-    #             if estado == 'KO':
-    #                 print(f"Taxi {taxi_id} ha detectado una incidencia y se detiene.")
-    #                 self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
-    #                 self.enviar_mensaje_taxi(taxi_id, 'STOP')
-    #             elif estado == 'OK':
-    #                 # Si el estado vuelve a OK, reanudar el servicio del taxi
-    #                 print(f"Taxi {taxi_id} ha resuelto la incidencia y continúa su viaje.")
-    #                 self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
-    #                 self.enviar_mensaje_taxi(taxi_id, 'RESUME')
-    
-    # def procesar_comandos(self):
-    #     # Procesa comandos arbitrarios enviados a los taxis desde EC_Central
-    #     for mensaje in self.consumer_comando:
-    #         datos_comando = json.loads(mensaje.value.decode())
-    #         taxi_id = datos_comando.get('taxi_id')
-    #         comando = datos_comando.get('comando')
-            
-    #         if taxi_id in self.taxis_autenticados:
-    #             print(f"Procesando comando '{comando}' para el taxi {taxi_id}")
-    #             self.enviar_mensaje_taxi(taxi_id, comando)
-    #             # Ejecutar acción local según el comando
-    #             if comando == 'PARAR':
-    #                 self.taxis_autenticados[taxi_id]['estado'] = 'stopped'
-    #             elif comando == 'REANUDAR':
-    #                 self.taxis_autenticados[taxi_id]['estado'] = 'BUSY'
-    #             elif comando == 'VOLVER_BASE':
-    #                 self.taxis_autenticados[taxi_id]['estado'] = 'returning'
-    #                 self.enviar_taxi_a_base(taxi_id)
-    
-    # def enviar_taxi_a_base(self, taxi_id):
-    #     # Envía un comando para que el taxi regrese a la base
-    #     mensaje = {
-    #         'taxi_id': taxi_id,
-    #         'destino': '1,1'  # La posición de la base es [1,1]
-    #     }
-    #     self.producer.send('ordenes_taxi', json.dumps(mensaje).encode())
-    #     print(f"Enviado taxi {taxi_id} a la base.")
-        
-        
-    # def enviar_mensaje_taxi(self, taxi_id, comando):
-    #     # Envía un comando específico a un taxi
-    #     mensaje = {
-    #         'taxi_id': taxi_id,
-    #         'comando': comando
-    #     }
-    #     self.producer.send('comando_taxi', json.dumps(mensaje).encode())
-    #     print(f"Enviado comando '{comando}' al taxi {taxi_id}")
-    
-    # def actualizar_mapa_taxi(self, taxi_id, destino):
-    #     # Actualiza la posición del taxi en el mapa y envía el estado del mapa
-    #     taxi_info = self.taxis_autenticados.get(taxi_id)
-    #     if taxi_info:
-    #         pos_actual = taxi_info['posicion']
-    #         destino_coord = destino.split(',')
-    #         taxi_info['posicion'] = destino_coord  # Solo como ejemplo, debería calcularse el movimiento
-    #         print(f"Taxi {taxi_id} moviéndose de {pos_actual} a {destino_coord}")
-    #         self.enviar_mapa_actualizado()
             
     def enviar_comando_taxi(self, taxi_id, comando):
         cliente_socket = self.sockets_taxis.get(taxi_id)

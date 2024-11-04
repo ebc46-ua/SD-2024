@@ -37,7 +37,6 @@ class EC_S:
             time.sleep(1)
             if self.contingency:
                 sensor_status = 'CONTINGENCY'
-                self.contingency = False  # Resetear la bandera después de enviar la contingencia
             else:
                 sensor_status = 'OK'
 
@@ -59,8 +58,16 @@ class EC_S:
 
     def detect_contingency(self):
         while True:
-            input("[EC_S] Presione Enter para simular una contingencia...")
-            self.contingency = True
+            input("[EC_S] Presione Enter para alternar contingencia o resolverla...")
+
+            # Si no hay una contingencia activa, la activamos
+            if not self.contingency:
+                self.contingency = True
+                print("[EC_S] Contingencia activada.")
+            else:
+                # Si ya había una contingencia activa, la resolvemos
+                self.contingency = False
+                print("[EC_S] Contingencia resuelta, enviando 'OK'.")
 
 if __name__ == "__main__":
 
@@ -80,4 +87,3 @@ if __name__ == "__main__":
     # Mantener el programa en ejecución
     while True:
         time.sleep(1)
-

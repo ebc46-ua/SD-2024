@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Número de taxis que deseas iniciar
-NUM_TAXIS=7
+NUM_TAXIS=3
 # Puerto base
 BASE_PORT=8888
 # Puerto escucha Central
-PUERTO_CENTRAL='2196'
+PUERTO_CENTRAL='2195'
 IP_CENTRAL='localhost'
 
 IP_PROPIA='localhost'
