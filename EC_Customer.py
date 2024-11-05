@@ -25,8 +25,8 @@ class EC_Customer:
         self.cargar_solicitudes()
 
         # Asignar el manejador de señales
-        signal.signal(signal.SIGINT, self.cerrar_conexion)
-        signal.signal(signal.SIGTERM, self.cerrar_conexion)
+        signal.signal(signal.SIGINT, self.on_closing)
+        signal.signal(signal.SIGTERM, self.on_closing)
 
     def cargar_solicitudes(self):
         try:
@@ -54,7 +54,7 @@ class EC_Customer:
                     'cliente_id': self.cliente_id,
                     'origen': origen_coord,
                     'destino': destino_id,
-                    'taxi_asignado': self.taxi_asignado  # Mantener el mismo taxi asignado
+                    'taxi_asignado': self.taxi_asignado
                 }
                 try:
                     self.producer.send('solicitudes', json.dumps(mensaje).encode()).get(timeout=10)
@@ -86,7 +86,7 @@ class EC_Customer:
                 if cliente_id_respuesta == self.cliente_id:
                     start_time = time.time()
                     if estado == 'OK':
-                        self.taxi_asignado = respuesta.get('taxi_id')  # Almacenar taxi asignado
+                        self.taxi_asignado = respuesta.get('taxi_id') 
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Su solicitud ha sido aceptada. Taxi asignado: {self.taxi_asignado}")
                     
                     elif estado == 'KO':
@@ -105,7 +105,7 @@ class EC_Customer:
                             self.enviar_solicitud()
                         else:
                             self.log(f"[CLIENTE {cliente_id_respuesta}] No hay más solicitudes pendientes. Taxi liberado.")
-                            self.taxi_asignado = None  # Liberar el taxi al finalizar todas las solicitudes
+                            self.taxi_asignado = None
                     else:
                         self.log(f"[CLIENTE {cliente_id_respuesta}] Estado desconocido: {estado}")
             
@@ -143,22 +143,11 @@ class EC_Customer:
             print(f"Error en log: {e}")
 
     def on_closing(self):
+        self.producer.close()
+        self.consumer.close()
         self.cerrar_conexion()
         self.root.quit()
         self.root.destroy()
-
-    def cerrar_conexion(self, *args):
-        self.log(f"[CLIENTE {self.cliente_id}] Cerrando conexiones de Kafka...")
-        try:
-            if self.producer:
-                self.producer.close()
-            if self.consumer:
-                self.consumer.close()
-        except Exception as e:
-            self.log(f"[CLIENTE {self.cliente_id}] Error al cerrar conexiones: {e}")
-        finally:
-            self.log(f"[CLIENTE {self.cliente_id}] Conexiones cerradas. Saliendo.")
-            self.root.quit()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ejecutar EC_Customer con parámetros de conexión y autenticación.")

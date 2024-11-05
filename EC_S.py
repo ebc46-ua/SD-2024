@@ -84,6 +84,5 @@ if __name__ == "__main__":
     de_port = args.de_port
 
     ec_s = EC_S(de_ip, de_port)
-    # Mantener el programa en ejecución
     while True:
         time.sleep(1)

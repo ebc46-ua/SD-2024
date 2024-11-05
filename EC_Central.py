@@ -806,26 +806,6 @@ class EC_Central:
 
         else:
             print(f"[CENTRAL] No se pudo enviar taxi {taxi_id} al cliente {cliente_id}.")
-
-
-
-
-
-    def calcular_siguiente_paso(self, posicion_actual, destino):
-        x_actual, y_actual = posicion_actual
-        x_dest, y_dest = destino
-
-        if x_actual < x_dest:
-            x_actual += 1
-        elif x_actual > x_dest:
-            x_actual -= 1
-
-        if y_actual < y_dest:
-            y_actual += 1
-        elif y_actual > y_dest:
-            y_actual -= 1
-
-        return x_actual, y_actual
             
     def enviar_comando_taxi(self, taxi_id, comando):
         cliente_socket = self.sockets_taxis.get(taxi_id)

@@ -13,10 +13,10 @@ class EC_DE:
         self.taxi_id = taxi_id
         self.posicion = (1, 1)
         self.sensor_status = 'OK'  # Estado inicial de los sensores
-        self.stopped = False  # Indica si el taxi está detenido por contingencia
-        self.stopped_by_command = False  # Indica si el taxi está detenido por un comando
+        self.stopped = False 
+        self.stopped_by_command = False 
         self.destino_actual = None
-        self.conectado_central = False  # Inicializar como False
+        self.conectado_central = False 
         self.buffer = ""
         self.autenticar()
         self.inicio_sensores()
@@ -50,7 +50,7 @@ class EC_DE:
 
                 if respuesta == 'ACK':
                     print("[EC_DE] Autenticación exitosa.")
-                    self.conectado_central = True  # Marcar que estamos conectados
+                    self.conectado_central = True 
                     # Iniciar hilo para escuchar instrucciones
                     threading.Thread(target=self.escuchar_instrucciones, daemon=True).start()
                 else:
@@ -80,10 +80,10 @@ class EC_DE:
                     while self.buffer.startswith("ACK") or self.buffer.startswith("NACK"):
                         if self.buffer.startswith("ACK"):
                             print("[EC_DE] ACK recibido")
-                            self.buffer = self.buffer[3:].strip()  # Eliminar "ACK" del buffer
+                            self.buffer = self.buffer[3:].strip() 
                         elif self.buffer.startswith("NACK"):
                             print("[EC_DE] NACK recibido")
-                            self.buffer = self.buffer[4:].strip()  # Eliminar "NACK" del buffer
+                            self.buffer = self.buffer[4:].strip() 
 
                     # Procesar el resto de los mensajes completos en el buffer
                     while True:
@@ -94,9 +94,9 @@ class EC_DE:
 
                         # Verificar si tenemos un mensaje completo
                         if stx_index != -1 and etx_index != -1 and lrc_index != -1 and etx_index < lrc_index:
-                            # Extraer el mensaje completo
+                            # Extraer el mensaje
                             mensaje_completo = self.buffer[stx_index:lrc_index + len('<LRC>') + 2]
-                            self.buffer = self.buffer[lrc_index + len('<LRC>') + 2:].strip()  # Actualizar el buffer
+                            self.buffer = self.buffer[lrc_index + len('<LRC>') + 2:].strip()
 
                             print(f"[EC_DE] Mensaje completo recibido: {mensaje_completo}")
 
@@ -114,7 +114,7 @@ class EC_DE:
 
 
     def procesar_mensaje(self, mensaje):
-        print(f"[EC_DE] Mensaje original: {mensaje}")  # Mostrar el mensaje recibido
+        print(f"[EC_DE] Mensaje original: {mensaje}")
 
         # Verificar si el mensaje incluye todas las partes: <STX>, <ETX>, y <LRC>
         if '<STX>' in mensaje and '<ETX>' in mensaje and '<LRC>' in mensaje:
@@ -216,18 +216,16 @@ class EC_DE:
     def verificar_lrc(self, data, lrc):
         # Implementar la verificación del LRC
         calculated_lrc = self.calcular_lrc(data)
-        return str(calculated_lrc) == lrc.strip()  # Compara correctamente
+        return str(calculated_lrc) == lrc.strip()
 
     def mover_hacia_destino(self, destino, es_destino_final=False):
         while self.posicion != destino:
-            # Si el taxi ha sido detenido por comando, espera indefinidamente hasta recibir el comando de reanudación
             if self.stopped_by_command:
-                if not self.stopped:  # Envía estado de detenido solo una vez
+                if not self.stopped: 
                     self.enviar_estado('STOPPED')
                     self.stopped = True
                     print("[EC_DE] Taxi detenido por comando. Esperando reanudación...")
 
-                # Espera activa mientras stopped_by_command sea True
                 time.sleep(30)
                 continue
 
@@ -310,7 +308,6 @@ class EC_DE:
         mensaje = f'<STX>{data}<ETX><LRC>{lrc}'
         try:
             self.socket_central.send(mensaje.encode())
-            # Ya no esperamos el ACK aquí
             print(f"[EC_DE] Estado '{estado}' enviado a EC_Central.")
         except Exception as e:
             print(f"[EC_DE] No se pudo enviar estado a EC_Central: {e}")
